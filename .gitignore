@@ -1,0 +1,42 @@
+# Ignore all distribution folders
+dist/
+
+# Ignore Poetry lock files
+poetry.lock
+
+# Ignore PyCharm project files
+.idea/
+
+# Byte-compiled / cached
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.pdm.toml
+
+# Virtual environment
+.venv/
+venv/
+ENV/
+env/
+pip-wheel-metadata/
+
+# Logs and database files
+*.log
+*.sqlite3
+
+# Ignore Jupyter Notebook checkpoints
+.ipynb_checkpoints/
+
+# Ignore VS Code workspace settings (if ever used)
+.vscode/
+
+# Ignore OS files
+.DS_Store
+Thumbs.db
+
+# Ignore temporary files
+*.swp
+*.swo
+*.bak
+*~

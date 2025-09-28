@@ -1,0 +1,8 @@
+# .dockerignore (at repo root if build context is ".")
+.venv
+.env
+.git
+__pycache__/
+*.pyc
+node_modules/
+xvideo/frontend/web/node_modules/

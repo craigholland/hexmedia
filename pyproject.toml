@@ -1,0 +1,87 @@
+[project]
+name = "hexmedia"
+version = "0.1.0"
+description = ""
+authors = [
+    {name = "Craig Holland",email = "craig_holland@hotmail.com"}
+]
+readme = "README.md"
+requires-python = ">=3.11,<3.13"
+dependencies = [
+]
+
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.poetry.dependencies]
+python = ">=3.12,<3.13"
+
+
+
+# API / web
+fastapi = ">=0.115,<1.0"
+uvicorn = { version = ">=0.29,<1.0", extras = ["standard"] }
+
+# DB / ORM
+sqlalchemy = ">=2.0,<3.0"
+psycopg = { version = ">=3.1,<4.0", extras = ["binary"] }
+alembic = ">=1.13,<2.0"
+
+# Validation / settings
+pydantic = ">=2.8,<3.0"
+pydantic-settings = "^2.4.0"
+python-dotenv = ">=1.0,<2.0"
+pillow = "^11.3.0"
+starlette = "^0.48.0"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.3"
+pytest-cov = "^5.0"
+httpx = "^0.27"           # used by FastAPI TestClient
+ruff = "^0.5"
+black = "^24.8"
+mypy = "^1.11"
+types-python-dateutil = "^2.9.0.20240316"  # if you end up using dateutil anywhere
+testcontainers = {version = "4.8.2", extras = ["test"]}
+
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+fix = true
+exclude = [
+  "xvideo/database/alembic/versions/*",  # generated migration scripts
+]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+ignore = [
+  "E203",  # black compatibility for slices
+]
+
+[tool.black]
+line-length = 100
+target-version = ["py312"]
+exclude = '''
+/(
+  \.venv
+  | xvideo/database/alembic/versions
+)/
+'''
+
+[tool.mypy]
+python_version = "3.12"
+warn_unused_ignores = true
+warn_redundant_casts = true
+warn_unreachable = true
+pretty = true
+strict_optional = true
+ignore_missing_imports = true
+exclude = "xvideo/database/alembic/versions"
+
+[tool.pytest.ini_options]
+addopts = "-q"
+testpaths = ["tests"]
+filterwarnings = ["ignore::DeprecationWarning"]
