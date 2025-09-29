@@ -48,7 +48,12 @@ class DBConfig(BaseModel):
     name: str = "hexmedia"
     user: str = "hexuser"
     password: str = "hexpass"
-    schema: str = "hexmedia"
+    schema_name: str = Field(default="hexmedia", alias="DB_SCHEMA")
+    echo: bool = False
+    pool_size: int = 10
+    max_overflow: int = 20
+    pool_pre_ping: bool = True
+    pool_recycle: int = 1800
 
     # Optional single URL (if set, it takes precedence)
     url: Optional[str] = Field(
@@ -198,7 +203,7 @@ class Settings(BaseSettings):
     @computed_field  # type: ignore[misc]
     @property
     def db_schema(self) -> str:
-        return self.db.schema
+        return self.db.schema_name
 
 
 @lru_cache(maxsize=1)

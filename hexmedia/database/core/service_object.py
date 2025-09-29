@@ -3,40 +3,49 @@ from __future__ import annotations
 
 from datetime import datetime
 from typing import Optional
-from uuid import UUID as _UUID
+from uuid import UUID as PyUUID
 
 from sqlalchemy import DateTime, Text, func, text
-from sqlalchemy.dialects.postgresql import JSONB, UUID
-from sqlalchemy.orm import Mapped, mapped_column
-
-from hexmedia.database.core.main import Base
+from sqlalchemy.dialects.postgresql import UUID, JSONB
+from sqlalchemy.orm import Mapped, mapped_column, declared_attr
 
 
-class ServiceObject(Base):
+class ServiceObject:
     """
-    Abstract base with common columns for all persisted models.
-    Subclass this in concrete models (define __tablename__ in subclasses).
+    Mixin providing common columns for persisted models.
+    Use with multiple inheritance: `class MyModel(ServiceObject, Base): ...`
     """
     __abstract__ = True
 
-    # Primary key
-    id: Mapped[_UUID] = mapped_column(
-        UUID(as_uuid=True),
-        primary_key=True,
-        server_default=text("uuid_generate_v4()"),  # requires uuid-ossp (created in env.py)
-    )
+    @declared_attr
+    def id(cls) -> Mapped[PyUUID]:
+        # requires `uuid-ossp` extension; we enable it in migrations
+        return mapped_column(
+            UUID(as_uuid=True),
+            primary_key=True,
+            server_default=text("gen_random_uuid()"),
+        )
 
-    # Timestamps
-    date_created: Mapped[Optional[datetime]] = mapped_column(
-        DateTime(timezone=True),
-        server_default=func.clock_timestamp(),
-    )
-    last_updated: Mapped[Optional[datetime]] = mapped_column(
-        DateTime(timezone=True),
-        server_default=func.clock_timestamp(),
-        onupdate=func.clock_timestamp(),
-    )
+    @declared_attr
+    def date_created(cls) -> Mapped[Optional[datetime]]:
+        return mapped_column(
+            DateTime(timezone=True),
+            server_default=func.clock_timestamp(),
+        )
 
-    # Optional provenance / metadata
-    data_origin: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    meta_data: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+    @declared_attr
+    def last_updated(cls) -> Mapped[Optional[datetime]]:
+        return mapped_column(
+            DateTime(timezone=True),
+            server_default=func.clock_timestamp(),
+            onupdate=func.clock_timestamp(),
+        )
+
+    @declared_attr
+    def data_origin(cls) -> Mapped[Optional[str]]:
+        return mapped_column(Text, nullable=True)
+
+    @declared_attr
+    def meta_data(cls) -> Mapped[Optional[dict]]:
+        # Use JSONB for Postgres; switch to JSON if targeting multiple DBs
+        return mapped_column(JSONB, nullable=True)
