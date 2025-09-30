@@ -1,13 +1,15 @@
 # hexmedia/domain/entities/media_item.py
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, asdict
 from datetime import datetime
 from typing import Optional, Tuple
 from uuid import UUID
 
 from hexmedia.domain.enums.media_kind import MediaKind
+from hexmedia.common.logging import get_logger
 
+logger = get_logger()
 
 @dataclass(frozen=True)
 class MediaIdentity:
@@ -39,6 +41,9 @@ class MediaIdentity:
 
     def assets_rel_dir(self) -> str:
         return f"{self.rel_dir()}/assets"
+
+    def as_dict(self):
+        return asdict(self)
 
 
 @dataclass
@@ -99,6 +104,7 @@ class MediaItem:
 
     def __post_init__(self):
         # Hydrate identity from convenience fields if caller passed them
+        logger.warning(f"CRAIG: MediaItem.__init__: media_folder {self.media_folder}")
         if self.identity is None:
             if not (self.media_folder and self.identity_name and self.video_ext):
                 raise ValueError("MediaItem requires identity triplet: media_folder, identity_name, video_ext")
@@ -154,3 +160,6 @@ class MediaItem:
 
     def assets_rel_dir(self) -> str:
         return self.identity.assets_rel_dir()
+
+    def as_dict(self):
+        return asdict(self)

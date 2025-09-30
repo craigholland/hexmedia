@@ -5,6 +5,8 @@ from dataclasses import dataclass, field, asdict
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
+from hexmedia.domain.policies.ingest_planner import IngestPlanItem
+
 
 # ---------------------------------------------------------------------------
 # Base report (shared fields + utilities)
@@ -18,8 +20,7 @@ class BaseReport:
     """
     started_at: Optional[datetime] = None
     finished_at: Optional[datetime] = None
-    # Each tuple is (subject/id/path, message)
-    error_details: List[Tuple[str, str]] = field(default_factory=list)
+    error_details: List[str] = field(default_factory=list)
 
     def start(self) -> None:
         if self.started_at is None:
@@ -28,8 +29,8 @@ class BaseReport:
     def stop(self) -> None:
         self.finished_at = datetime.now()
 
-    def add_error(self, subject: str, message: str) -> None:
-        self.error_details.append((subject, message))
+    def add_error(self, message: str) -> None:
+        self.error_details.append(message)
 
     def as_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -44,6 +45,7 @@ class ThumbReport(BaseReport):
     generated: int = 0
     skipped: int = 0
     errors: int = 0
+    items: List[Any] = field(default_factory=list)
 
     def merge(self, other: "ThumbReport") -> "ThumbReport":
         self.planned += other.planned
@@ -69,6 +71,7 @@ class ProbeReport(BaseReport):
     not_supported: int = 0     # e.g., non-media or extensions we skip
     missing_files: int = 0
     errors: int = 0
+    items: List[Any] = field(default_factory=list)
 
     def merge(self, other: "ProbeReport") -> "ProbeReport":
         self.planned += other.planned
@@ -96,6 +99,9 @@ class IngestReport(BaseReport):
     created: int = 0          # DB rows created (media items)
     updated: int = 0          # DB rows updated (rare; overwrite or upsert)
     errors: int = 0
+
+    items: List[Any] = field(default_factory=list)
+    planned_items: Optional[List[dict]] = None
 
     # Arbitrary counters you might want to surface (extensible without schema churn)
     extra: Dict[str, Any] = field(default_factory=dict)

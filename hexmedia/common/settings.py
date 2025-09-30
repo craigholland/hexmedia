@@ -83,9 +83,9 @@ class ConcurrencyConfig(BaseModel):
 
 
 class FFProbeConfig(BaseModel):
-    bin: str = "ffprobe"
     timeout_sec: int = 30
     log_level: str = "error"  # quiet|panic|fatal|error|warning|info|verbose|debug|trace
+    bin: str = Field(default="/usr/bin/ffprobe", alias="FFPROBE_BIN")
 
 
 class FeatureFlags(BaseModel):

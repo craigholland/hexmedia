@@ -10,7 +10,7 @@ from typing import Optional
 
 from hexmedia.common.settings import get_settings
 from hexmedia.common.logging import get_logger
-from hexmedia.domain.entities.probe import ProbeResult
+from hexmedia.domain.dataclasses.probe import ProbeResult
 from hexmedia.domain.ports.probe import MediaProbePort
 
 logger = get_logger()
@@ -33,7 +33,7 @@ class FFprobeAdapter(MediaProbePort):
     def __init__(self, ffprobe_bin: Optional[str] = None, timeout_sec: Optional[int] = None):
         cfg = get_settings()
         # choose binary
-        candidate = ffprobe_bin or cfg.FFPROBE_BIN
+        candidate = ffprobe_bin or cfg.ffprobe.bin
         if not candidate or candidate == "ffprobe":
             # try to resolve absolute path for nicer errors
             resolved = shutil.which(candidate or "ffprobe")
@@ -42,7 +42,7 @@ class FFprobeAdapter(MediaProbePort):
             candidate = resolved
 
         self.ffprobe_bin = candidate
-        self.timeout_sec = int(timeout_sec or cfg.PROBE_TIMEOUT_SEC or 15)
+        self.timeout_sec = int(timeout_sec or cfg.ffprobe.timeout_sec or 15)
 
     # ---- Port API -------------------------------------------------------------
     def probe(self, path: Path) -> ProbeResult:
@@ -86,6 +86,7 @@ class FFprobeAdapter(MediaProbePort):
     # ---- Parsing helpers ------------------------------------------------------
     @staticmethod
     def _parse_ffprobe_json(data: dict) -> ProbeResult:
+
         fmt = data.get("format") or {}
         streams = list(data.get("streams") or [])
 
