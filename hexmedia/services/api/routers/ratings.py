@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from hexmedia.database.models.media import MediaItem, Rating
 from hexmedia.services.schemas import RatingCreate, RatingRead
-from hexmedia.services.api.deps import get_db
+from hexmedia.services.api.deps import transactional_session
 
 router = APIRouter()
 
@@ -14,7 +14,7 @@ def _to_out(r: Rating) -> RatingRead:
     return RatingRead.model_validate(r)
 
 @router.put("/media-items/{item_id}", response_model=RatingRead, status_code=HTTPStatus.CREATED)
-def put_rating(item_id: str = Path(...), payload: RatingCreate = ..., db: Session = Depends(get_db)) -> RatingRead:
+def put_rating(item_id: str = Path(...), payload: RatingCreate = ..., db: Session = Depends(transactional_session)) -> RatingRead:
     item = db.get(MediaItem, item_id)
     if not item:
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="MediaItem not found")
@@ -32,16 +32,15 @@ def put_rating(item_id: str = Path(...), payload: RatingCreate = ..., db: Sessio
     return _to_out(rating)
 
 @router.get("/media-items/{item_id}", response_model=RatingRead)
-def get_rating(item_id: str, db: Session = Depends(get_db)) -> RatingRead:
+def get_rating(item_id: str, db: Session = Depends(transactional_session)) -> RatingRead:
     rating = db.get(Rating, item_id)
     if not rating:
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Rating not found")
     return _to_out(rating)
 
 @router.delete("/media-items/{item_id}", status_code=HTTPStatus.NO_CONTENT)
-def delete_rating(item_id: str, db: Session = Depends(get_db)) -> None:
+def delete_rating(item_id: str, db: Session = Depends(transactional_session)) -> None:
     rating = db.get(Rating, item_id)
     if not rating:
         return
     db.delete(rating)
-    db.flush()

@@ -223,6 +223,5 @@ class SqlAlchemyMediaRepo:
         self.db.add(db_row)
         self.db.flush()
         self.db.refresh(db_row)
-        self.db.commit()
         return self._to_domain(db_row)
 

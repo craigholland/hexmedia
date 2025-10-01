@@ -7,16 +7,20 @@ from pydantic import BaseModel, ConfigDict
 # Tag
 class TagBase(BaseModel):
     name: str
-    path: str
-    is_deprecated: bool = False
+    slug: str
+    group_path: Optional[str]
+    parent_path: Optional[str]
+    description: Optional[str]
 
 class TagCreate(TagBase):
-    pass
+    group_path: Optional[str]
+    parent_path: Optional[str]
 
 class TagUpdate(BaseModel):
     name: Optional[str] = None
-    path: Optional[str] = None
-    is_deprecated: Optional[bool] = None
+    group_path: Optional[str]
+    parent_path: Optional[str]
+    description: Optional[str]
 
 class TagRead(TagBase):
     id: UUID

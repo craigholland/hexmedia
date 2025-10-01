@@ -5,7 +5,7 @@ from sqlalchemy import select, and_, func
 from sqlalchemy.orm import Session
 
 from hexmedia.database.models.taxonomy import Tag, TagGroup, MediaTag
-from hexmedia.common.naming.slugger import random_slug  # or use your common/naming helpers
+from hexmedia.common.naming.slugger import slugify
 
 class TagRepo:
     def __init__(self, db: Session) -> None:

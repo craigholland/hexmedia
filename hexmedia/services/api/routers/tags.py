@@ -25,7 +25,7 @@ def _to_out(t: Tag) -> TagRead:
     return TagRead.model_validate(t)
 
 @router.post("", response_model=TagRead, status_code=HTTPStatus.CREATED)
-def create_tag(payload: TagCreate, group_path: Optional[str], db: Session = Depends(get_db)) -> TagRead:
+def create_tag(payload: TagCreate, group_path: Optional[str], db: Session = Depends(transactional_session)) -> TagRead:
     obj = Tag(**payload.model_dump())
     db.add(obj)
     db.flush()
@@ -48,7 +48,7 @@ def list_tags(q: str | None = Query(None), limit: int = 100, db: Session = Depen
     return [ _to_out(r) for r in rows ]
 
 @router.patch("/{tag_id}", response_model=TagRead)
-def patch_tag(tag_id: str, payload: TagUpdate, db: Session = Depends(get_db)) -> TagRead:
+def patch_tag(tag_id: str, payload: TagUpdate, db: Session = Depends(transactional_session)) -> TagRead:
     obj = db.get(Tag, tag_id)
     if not obj:
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Tag not found")
@@ -67,7 +67,7 @@ def delete_tag(tag_id: str, db: Session = Depends(get_db)) -> None:
     db.flush()
 
 @router.get("/tag-groups/tree", response_model=List[TagGroupNode])
-def tag_group_tree(db: Session = Depends(transactional_session)) -> List[TagGroupNode]:
+def tag_group_tree(db: Session = Depends(get_db)) -> List[TagGroupNode]:
     repo = TagRepo(db)
     rows = repo.list_group_tree()
 

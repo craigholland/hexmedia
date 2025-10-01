@@ -24,14 +24,12 @@ def _t(name: str):
     return Base.metadata.tables[key]
 
 
-class Tag(Base):
+class Tag(ServiceObject, Base):
     __tablename__ = "tag"
     __table_args__ = (
         UniqueConstraint("group_id", "slug", name="uq_tag_group_slug"),
         CheckConstraint("(parent_id IS NULL) OR (group_id IS NOT NULL)", name="ck_tag_parent_requires_group"),
     )
-
-    id: Mapped[UUID_t] = mapped_column(primary_key=True)
     group_id: Mapped[Optional[UUID_t]] = mapped_column(ForeignKey("tag_group.id", ondelete="SET NULL"))
     name: Mapped[str] = mapped_column(String(128), nullable=False)
     slug: Mapped[str] = mapped_column(String(128), nullable=False)
@@ -79,25 +77,23 @@ class MediaPerson(Base):
     )
 
 
-class TagGroup(Base):
+class TagGroup(ServiceObject, Base):
     __tablename__ = "tag_group"
     __table_args__ = (
         UniqueConstraint("parent_id", "key", name="uq_taggroup_parent_key"),
         UniqueConstraint("path", name="uq_taggroup_path"),
     )
-
-    id: Mapped[UUID_t] = mapped_column(primary_key=True)
     parent_id: Mapped[Optional[UUID_t]] = mapped_column(ForeignKey("tag_group.id", ondelete="RESTRICT"))
     key: Mapped[str] = mapped_column(String(64), nullable=False)          # slug-like within the parent
     display_name: Mapped[str] = mapped_column(String(128), nullable=False)
     cardinality: Mapped[Cardinality] = mapped_column(
         SAEnum(Cardinality, name="tag_cardinality"),
         nullable=False,
-        server_default="multi",
+        server_default="MULTI",
     )
     description: Mapped[Optional[str]] = mapped_column(Text)
     path: Mapped[str] = mapped_column(Text, nullable=False)                # computed at app layer
-    depth: Mapped[int] = mapped_column(Integer, nullable=False, default=0) # 0=root
+    depth: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default='0') # 0=root
 
     parent: Mapped[Optional["TagGroup"]] = relationship(remote_side="TagGroup.id", backref="children")
     tags: Mapped[List["Tag"]] = relationship(back_populates="group")

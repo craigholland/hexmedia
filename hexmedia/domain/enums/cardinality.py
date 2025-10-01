@@ -1,5 +1,5 @@
 from enum import StrEnum
 
 class Cardinality(StrEnum):
-    SINGLE = "single"
-    MULTI = "multi"
+    SINGLE = "SINGLE"
+    MULTI = "MULTI"
