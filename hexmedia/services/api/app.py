@@ -4,7 +4,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from hexmedia.common.settings import get_settings
-from hexmedia.services.api.routers import media_items, ratings, tags, people, ingest
+from hexmedia.services.api.routers import media_items, ratings, tags, people, ingest, assets
 
 cfg = get_settings()
 
@@ -32,6 +32,7 @@ def create_app() -> FastAPI:
     app.include_router(people.router, prefix=f"{cfg.api.prefix}/people", tags=["people"])
     app.include_router(ingest.router, prefix=f"{cfg.api.prefix}/ingest", tags=["ingest"])
 
+    app.include_router(assets.router, prefix=f"{cfg.api.prefix}/assets", tags=["assets"])
     return app
 
 app = create_app()

@@ -5,7 +5,7 @@ from typing import Optional
 
 from hexmedia.common.settings import get_settings
 from hexmedia.database.repos.media_query import MediaQueryRepo
-from hexmedia.database.repos.media_asset_repo import SqlAlchemyMediaAssetWriter
+from hexmedia.database.repos.media_asset_repo import SqlAlchemyMediaAssetRepo
 from hexmedia.services.thumbs.video_thumbnail import VideoThumbnail
 from hexmedia.domain.enums.asset_kind import AssetKind
 
@@ -21,7 +21,7 @@ class ThumbWorker:
         *,
         media_root: Path,
         query_repo: MediaQueryRepo,
-        asset_repo: SqlAlchemyMediaAssetWriter,
+        asset_repo: SqlAlchemyMediaAssetRepo,
         thumb_format: str,
         collage_format: str,
         thumb_width: int,
@@ -43,22 +43,28 @@ class ThumbWorker:
 
     def process_one(self, media_item_id: str, rel_dir: str, file_name: str) -> dict:
         """
-        Returns counters: {"generated": int, "updated": int, "skipped": int, "errors": int}
+        Returns:
+          {
+            "generated": int, "updated": int, "skipped": int, "errors": int,
+            "assets": [
+              {"kind": "thumb", "rel_path": "assets/thumb.png", "width": 960, "height": 540},
+              {"kind": "contact_sheet", "rel_path": "assets/contact_sheet.png", "width": 1200, "height": 675}
+            ]
+          }
         """
-        out = {"generated": 0, "updated": 0, "skipped": 0, "errors": 0}
+        out = {"generated": 0, "updated": 0, "skipped": 0, "errors": 0, "assets": []}
         item_dir = self.media_root / rel_dir
         video_path = item_dir / file_name
         assets_dir = item_dir / "assets"
         assets_dir.mkdir(parents=True, exist_ok=True)
 
-        if not video_path.exists():
-            if not self.include_missing:
-                out["skipped"] += 1
-                return out
+        if not video_path.exists() and not self.include_missing:
+            out["skipped"] += 1
+            return out
 
         vt = VideoThumbnail(video_path)
 
-        # 1) thumb ~10%
+        # 1) thumb
         tpath = assets_dir / f"thumb.{self.thumb_format}"
         try:
             vt.generate_thumbnail(
@@ -69,19 +75,18 @@ class ThumbWorker:
                 allow_upscale=self.upscale_policy,
             )
             w, h = self._image_size_or_none(tpath)
-            self.w.upsert_asset(
-                media_item_id=media_item_id,
-                kind=AssetKind.thumb,           # <-- adjust if your enum value differs
-                rel_path=str(Path("assets") / tpath.name).replace("\\", "/"),
-                width=w, height=h,
-            )
+            out["assets"].append({
+                "kind": "thumb",
+                "rel_path": str(Path("assets") / tpath.name).replace("\\", "/"),
+                "width": w, "height": h,
+            })
             out["generated"] += 1
             out["updated"] += 1
         except Exception:
             out["errors"] += 1
-            return out  # stop early; keep consistent pair generation
+            return out  # keep pair consistency
 
-        # 2) contact sheet 3x3
+        # 2) contact sheet
         spath = assets_dir / f"contact_sheet.{self.collage_format}"
         try:
             sheet = vt.generate_collage(
@@ -94,12 +99,11 @@ class ThumbWorker:
             )
             if sheet is not None:
                 w, h = self._image_size_or_none(spath)
-                self.w.upsert_asset(
-                    media_item_id=media_item_id,
-                    kind=AssetKind.contact_sheet,   # <-- adjust if needed
-                    rel_path=str(Path("assets") / spath.name).replace("\\", "/"),
-                    width=w, height=h,
-                )
+                out["assets"].append({
+                    "kind": "contact_sheet",
+                    "rel_path": str(Path("assets") / spath.name).replace("\\", "/"),
+                    "width": w, "height": h,
+                })
                 out["generated"] += 1
                 out["updated"] += 1
             else:

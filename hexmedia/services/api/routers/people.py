@@ -1,58 +1,128 @@
 from __future__ import annotations
-
 from http import HTTPStatus
 from typing import List
-from fastapi import APIRouter, Depends, HTTPException, Path, Query
-from sqlalchemy import select
+from uuid import UUID
+
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, Body
 from sqlalchemy.orm import Session
 
-from hexmedia.database.models.taxonomy import Person
-from hexmedia.services.schemas import PersonCreate, PersonRead, PersonUpdate
-from hexmedia.services.api.deps import get_db
+from hexmedia.services.api.deps import transactional_session
+from hexmedia.database.repos.people_repo import SqlAlchemyPeopleRepo
+from hexmedia.services.schemas.people import (
+    PersonRead, PersonCreate, PersonUpdate, PersonLinkPayload
+)
 
-router = APIRouter()
+router = APIRouter(prefix="/api/people", tags=["people"])
 
-def _to_out(p: Person) -> PersonRead:
-    return PersonRead.model_validate(p)
-
-@router.post("", response_model=PersonRead, status_code=HTTPStatus.CREATED)
-def create_person(payload: PersonCreate, db: Session = Depends(get_db)) -> PersonRead:
-    obj = Person(**payload.model_dump())
-    db.add(obj)
-    db.flush()
-    db.refresh(obj)
-    return _to_out(obj)
-
-@router.get("/{person_id}", response_model=PersonRead)
-def get_person(person_id: str, db: Session = Depends(get_db)) -> PersonRead:
-    obj = db.get(Person, person_id)
-    if not obj:
-        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Person not found")
-    return _to_out(obj)
+# ---------- People (CRUD) ----------
 
 @router.get("", response_model=List[PersonRead])
-def list_people(q: str | None = Query(None), limit: int = 100, db: Session = Depends(get_db)) -> List[PersonRead]:
-    stmt = select(Person)
-    if q:
-        stmt = stmt.where(Person.display_name.ilike(f"%{q}%"))
-    rows = db.execute(stmt.order_by(Person.display_name.asc()).limit(limit)).scalars().all()
-    return [ _to_out(r) for r in rows ]
+def search_people(
+    q: str = Query("", description="case-insensitive substring"),
+    limit: int = Query(25, ge=1, le=100),
+    db: Session = Depends(transactional_session),
+) -> List[PersonRead]:
+    repo = SqlAlchemyPeopleRepo(db)
+    rows = repo.search(q, limit=limit)
+    return [PersonRead.model_validate(r) for r in rows]
 
-@router.patch("/{person_id}", response_model=PersonRead)
-def patch_person(person_id: str, payload: PersonUpdate, db: Session = Depends(get_db)) -> PersonRead:
-    obj = db.get(Person, person_id)
+@router.get("/{person_id}", response_model=PersonRead)
+def get_person(
+    person_id: UUID = Path(...),
+    db: Session = Depends(transactional_session),
+) -> PersonRead:
+    repo = SqlAlchemyPeopleRepo(db)
+    obj = repo.get(person_id)
     if not obj:
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Person not found")
-    for k, v in payload.model_dump(exclude_unset=True).items():
-        setattr(obj, k, v)
-    db.flush()
-    db.refresh(obj)
-    return _to_out(obj)
+    return PersonRead.model_validate(obj)
+
+@router.post("", response_model=PersonRead, status_code=HTTPStatus.CREATED)
+def create_person(
+    payload: PersonCreate,
+    db: Session = Depends(transactional_session),
+) -> PersonRead:
+    repo = SqlAlchemyPeopleRepo(db)
+    obj = repo.create(display_name=payload.name, normalized_name=payload.aka)
+    db.flush(); db.refresh(obj)
+    return PersonRead.model_validate(obj)
+
+@router.patch("/{person_id}", response_model=PersonRead)
+def update_person(
+    person_id: UUID,
+    payload: PersonUpdate,
+    db: Session = Depends(transactional_session),
+) -> PersonRead:
+    repo = SqlAlchemyPeopleRepo(db)
+    try:
+        obj = repo.update(person_id, display_name=payload.name, normalized_name=payload.aka)
+        db.flush(); db.refresh(obj)
+    except ValueError:
+        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Person not found")
+    return PersonRead.model_validate(obj)
 
 @router.delete("/{person_id}", status_code=HTTPStatus.NO_CONTENT)
-def delete_person(person_id: str, db: Session = Depends(get_db)) -> None:
-    obj = db.get(Person, person_id)
-    if not obj:
-        return
-    db.delete(obj)
+def delete_person(
+    person_id: UUID,
+    db: Session = Depends(transactional_session),
+) -> None:
+    repo = SqlAlchemyPeopleRepo(db)
+    repo.delete(person_id)
+    db.flush()
+
+# ---------- Links (Media <-> People) ----------
+
+@router.get("/by-media/{media_item_id}", response_model=List[PersonRead])
+def list_people_for_media(
+    media_item_id: UUID = Path(...),
+    db: Session = Depends(transactional_session),
+) -> List[PersonRead]:
+    repo = SqlAlchemyPeopleRepo(db)
+    rows = repo.list_by_media(media_item_id)
+    return [PersonRead.model_validate(r) for r in rows]
+
+@router.post("/{person_id}/link/{media_item_id}", status_code=HTTPStatus.NO_CONTENT)
+def link_person_to_media(
+    person_id: UUID,
+    media_item_id: UUID,
+    db: Session = Depends(transactional_session),
+) -> None:
+    repo = SqlAlchemyPeopleRepo(db)
+    try:
+        repo.link(media_item_id=media_item_id, person_id=person_id)
+        db.flush()
+    except ValueError as e:
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(e))
+
+@router.delete("/{person_id}/link/{media_item_id}", status_code=HTTPStatus.NO_CONTENT)
+def unlink_person_from_media(
+    person_id: UUID,
+    media_item_id: UUID,
+    db: Session = Depends(transactional_session),
+) -> None:
+    repo = SqlAlchemyPeopleRepo(db)
+    repo.unlink(media_item_id=media_item_id, person_id=person_id)
+    db.flush()
+
+# (Optional) Body-based link/unlink endpoints if you prefer POST bodies over path params:
+
+@router.post("/link", status_code=HTTPStatus.NO_CONTENT)
+def link_person_to_media_body(
+    payload: PersonLinkPayload = Body(...),
+    db: Session = Depends(transactional_session),
+) -> None:
+    repo = SqlAlchemyPeopleRepo(db)
+    try:
+        repo.link(media_item_id=payload.media_item_id, person_id=payload.person_id)
+        db.flush()
+    except ValueError as e:
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(e))
+
+@router.post("/unlink", status_code=HTTPStatus.NO_CONTENT)
+def unlink_person_from_media_body(
+    payload: PersonLinkPayload = Body(...),
+    db: Session = Depends(transactional_session),
+) -> None:
+    repo = SqlAlchemyPeopleRepo(db)
+    repo.unlink(media_item_id=payload.media_item_id, person_id=payload.person_id)
     db.flush()

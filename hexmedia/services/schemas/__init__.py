@@ -12,9 +12,15 @@ from hexmedia.services.schemas.taxonomy import (
     PersonRead,
     PersonCreate,
     PersonUpdate,
+
+)
+from hexmedia.services.schemas.tags import (
     TagRead,
     TagCreate,
     TagUpdate,
+    TagGroupNode,
+    TagGroupMove,
+    TagGroupCreate
 )
 
 __all__ = [
@@ -29,4 +35,7 @@ __all__ = [
     "TagRead",
     "TagCreate",
     "TagUpdate",
+    "TagGroupNode",
+    "TagGroupMove",
+    "TagGroupCreate"
 ]

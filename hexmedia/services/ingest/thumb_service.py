@@ -8,9 +8,10 @@ from typing import Optional
 from sqlalchemy.orm import Session
 
 from hexmedia.common.settings import get_settings
-from hexmedia.database.repos.media_asset_repo import SqlAlchemyMediaAssetWriter
+from hexmedia.database.repos.media_asset_repo import SqlAlchemyMediaAssetRepo
 from hexmedia.database.repos.media_query import MediaQueryRepo
 from hexmedia.services.ingest.thumb_worker import ThumbWorker
+from hexmedia.domain.enums.asset_kind import AssetKind
 
 @dataclass
 class ThumbRunReport:
@@ -31,7 +32,7 @@ class ThumbService:
         self.session = session
         self.cfg = get_settings()
         self.q = MediaQueryRepo(session)
-        self.w = SqlAlchemyMediaAssetWriter(session)
+        self.w = SqlAlchemyMediaAssetRepo(session)
 
     def run(
         self,
@@ -69,6 +70,11 @@ class ThumbService:
 
         # parallel
         max_workers = min(workers or 1, self.cfg.MAX_THUMB_WORKERS)
+
+        rep = ThumbRunReport();
+        rep.start()
+
+        results = []
         with ThreadPoolExecutor(max_workers=max_workers) as pool:
             futures = {
                 pool.submit(tw.process_one, mid, rel_dir, fname): (mid, rel_dir, fname)
@@ -77,15 +83,28 @@ class ThumbService:
             for fut in as_completed(futures):
                 try:
                     out = fut.result()
+                    results.append((futures[fut][0], out))  # (media_item_id, out)
                     rep.scanned += 1
                     rep.generated += out.get("generated", 0)
-                    rep.updated += out.get("updated", 0)
                     rep.skipped += out.get("skipped", 0)
                     rep.errors += out.get("errors", 0)
                 except Exception as ex:
                     rep.scanned += 1
                     rep.errors += 1
                     rep.error_details.append(str(ex))
+
+        # --- Main thread: perform DB writes ---
+        for media_item_id, out in results:
+            for asset in out.get("assets", []):
+                kind = AssetKind(asset["kind"])  # "thumb" | "contact_sheet"
+                self.w.upsert_asset(
+                    media_item_id=media_item_id,
+                    kind=kind,
+                    rel_path=asset["rel_path"],
+                    width=asset["width"],
+                    height=asset["height"],
+                )
+                rep.updated += 0  # already counted above; keep if you prefer to count here
 
         rep.stop()
         return rep

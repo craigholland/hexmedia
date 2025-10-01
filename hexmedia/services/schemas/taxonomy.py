@@ -4,23 +4,7 @@ from typing import Optional
 from uuid import UUID
 from pydantic import BaseModel, ConfigDict
 
-# Tag
-class TagBase(BaseModel):
-    name: str
-    path: str
-    is_deprecated: bool = False
 
-class TagCreate(TagBase):
-    pass
-
-class TagUpdate(BaseModel):
-    name: Optional[str] = None
-    path: Optional[str] = None
-    is_deprecated: Optional[bool] = None
-
-class TagRead(TagBase):
-    id: UUID
-    model_config = ConfigDict(from_attributes=True)
 
 # Person
 class PersonBase(BaseModel):

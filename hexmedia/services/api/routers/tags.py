@@ -1,14 +1,23 @@
 from __future__ import annotations
 
 from http import HTTPStatus
-from typing import List
+from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Path, Query
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+from uuid import UUID
 
+from hexmedia.database.repos.tag_repo import TagRepo
 from hexmedia.database.models.taxonomy import Tag
-from hexmedia.services.schemas import TagCreate, TagRead, TagUpdate
-from hexmedia.services.api.deps import get_db
+from hexmedia.services.schemas import (
+    TagCreate,
+    TagRead,
+    TagUpdate,
+    TagGroupCreate,
+    TagGroupMove,
+    TagGroupNode
+)
+from hexmedia.services.api.deps import get_db, transactional_session
 
 router = APIRouter()
 
@@ -16,7 +25,7 @@ def _to_out(t: Tag) -> TagRead:
     return TagRead.model_validate(t)
 
 @router.post("", response_model=TagRead, status_code=HTTPStatus.CREATED)
-def create_tag(payload: TagCreate, db: Session = Depends(get_db)) -> TagRead:
+def create_tag(payload: TagCreate, group_path: Optional[str], db: Session = Depends(get_db)) -> TagRead:
     obj = Tag(**payload.model_dump())
     db.add(obj)
     db.flush()
@@ -56,3 +65,46 @@ def delete_tag(tag_id: str, db: Session = Depends(get_db)) -> None:
         return
     db.delete(obj)
     db.flush()
+
+@router.get("/tag-groups/tree", response_model=List[TagGroupNode])
+def tag_group_tree(db: Session = Depends(transactional_session)) -> List[TagGroupNode]:
+    repo = TagRepo(db)
+    rows = repo.list_group_tree()
+
+    # Build adjacency in memory
+    by_id = {g.id: TagGroupNode.model_validate(g) for g in rows}
+    roots: List[TagGroupNode] = []
+    for g in rows:
+        node = by_id[g.id]
+        if g.parent_id and g.parent_id in by_id:
+            by_id[g.parent_id].children.append(node)
+        else:
+            roots.append(node)
+    return roots
+
+@router.post("/tag-groups", response_model=TagGroupNode, status_code=HTTPStatus.CREATED)
+def create_tag_group(payload: TagGroupCreate, db: Session = Depends(transactional_session)) -> TagGroupNode:
+    repo = TagRepo(db)
+    try:
+        obj = repo.create_group(
+            key=payload.key,
+            display_name=payload.display_name,
+            cardinality=payload.cardinality or "multi",
+            description=payload.description,
+            parent_id=payload.parent_id,
+            parent_path=payload.parent_path,
+        )
+        db.flush(); db.refresh(obj)
+        return TagGroupNode.model_validate(obj)
+    except ValueError as e:
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(e))
+
+@router.post("/tag-groups/{group_id}/move", response_model=TagGroupNode)
+def move_tag_group(group_id: UUID, payload: TagGroupMove, db: Session = Depends(transactional_session)) -> TagGroupNode:
+    repo = TagRepo(db)
+    try:
+        obj = repo.move_group(group_id, new_parent_id=payload.new_parent_id, new_parent_path=payload.new_parent_path)
+        db.flush(); db.refresh(obj)
+        return TagGroupNode.model_validate(obj)
+    except ValueError as e:
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(e))

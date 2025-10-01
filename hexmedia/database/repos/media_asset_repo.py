@@ -1,52 +1,108 @@
-# hexmedia/database/repos/media_asset_repo.py
 from __future__ import annotations
-from typing import Optional
+
+from typing import Optional, List
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import select, and_
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from hexmedia.database.models.media import MediaAsset as DBMediaAsset, MediaItem as DBMediaItem
-from hexmedia.domain.entities.media_asset import MediaAsset as DomainAsset  # if you have it
+from hexmedia.database.models.media import MediaAsset as DBMediaAsset
 from hexmedia.domain.enums.asset_kind import AssetKind
 
-class SqlAlchemyMediaAssetWriter:
-    def __init__(self, session: Session) -> None:
-        self.session = session
 
-    def upsert_asset(
+class SqlAlchemyMediaAssetRepo:
+    def __init__(self, session: Session) -> None:
+        self.db = session
+
+    # --------- Reads ---------
+
+    def get(self, asset_id: UUID) -> Optional[DBMediaAsset]:
+        return self.db.get(DBMediaAsset, asset_id)
+
+    def list_by_media(self, media_item_id: UUID) -> List[DBMediaAsset]:
+        stmt = (
+            select(DBMediaAsset)
+            .where(DBMediaAsset.media_item_id == media_item_id)
+            .order_by(DBMediaAsset.kind.asc())
+        )
+        return self.db.execute(stmt).scalars().all()
+
+    def get_by_item_kind(self, media_item_id: UUID, kind: AssetKind) -> Optional[DBMediaAsset]:
+        stmt = select(DBMediaAsset).where(
+            and_(
+                DBMediaAsset.media_item_id == media_item_id,
+                DBMediaAsset.kind == kind,
+            )
+        ).limit(1)
+        return self.db.execute(stmt).scalars().first()
+
+    # --------- Writes ---------
+
+    def create(
         self,
         *,
-        media_item_id: str | UUID,
-        kind: str | AssetKind,
+        media_item_id: UUID,
+        kind: AssetKind,
         rel_path: str,
-        width: Optional[int],
-        height: Optional[int],
-    ) -> None:
-        # normalize
-        mid = media_item_id
-        akind = kind if isinstance(kind, AssetKind) else AssetKind(kind)
+        width: int | None = None,
+        height: int | None = None,
+    ) -> DBMediaAsset:
+        obj = DBMediaAsset(
+            media_item_id=media_item_id,
+            kind=kind,
+            rel_path=rel_path,
+            width=width,
+            height=height,
+        )
+        self.db.add(obj)
+        # let caller control flush/commit when used transactionally
+        return obj
 
-        # try fetch
-        row = self.session.execute(
-            select(DBMediaAsset).where(
-                DBMediaAsset.media_item_id == mid,
-                DBMediaAsset.kind == akind,
-            )
-        ).scalars().first()
+    def upsert(
+        self,
+        *,
+        media_item_id: UUID,
+        kind: AssetKind,
+        rel_path: str,
+        width: int | None = None,
+        height: int | None = None,
+    ) -> DBMediaAsset:
+        existing = self.get_by_item_kind(media_item_id, kind)
+        if existing:
+            existing.rel_path = rel_path
+            existing.width = width
+            existing.height = height
+            return existing
+        return self.create(
+            media_item_id=media_item_id,
+            kind=kind,
+            rel_path=rel_path,
+            width=width,
+            height=height,
+        )
 
-        if row:
-            row.rel_path = rel_path
-            row.width = width
-            row.height = height
-        else:
-            self.session.add(
-                DBMediaAsset(
-                    media_item_id=mid,
-                    kind=akind,
-                    rel_path=rel_path,
-                    width=width,
-                    height=height,
-                )
-            )
-        # no commit here; request-scoped transaction will handle it
+    def update(
+        self,
+        asset_id: UUID,
+        *,
+        rel_path: str | None = None,
+        width: int | None = None,
+        height: int | None = None,
+    ) -> DBMediaAsset:
+        obj = self.get(asset_id)
+        if not obj:
+            raise ValueError("Asset not found")
+        if rel_path is not None:
+            obj.rel_path = rel_path
+        if width is not None:
+            obj.width = width
+        if height is not None:
+            obj.height = height
+        return obj
+
+    def delete(self, asset_id: UUID) -> None:
+        obj = self.get(asset_id)
+        if not obj:
+            return
+        self.db.delete(obj)

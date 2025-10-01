@@ -86,11 +86,14 @@ def generate_thumbs(
 
 @router.get("/thumb_plan", response_model=list[ThumbPlanItem])
 def thumb_plan(
-    limit: int = Query(50, ge=1, le=1000),
+    limit: int | None = Query(None, ge=1, le=100),
     missing: str = Query("either", pattern="^(either|both)$",
                          description="List videos missing either asset (default) or both"),
     session: Session = Depends(transactional_session),
 ) -> list[ThumbPlanItem]:
+    if limit is None:
+        limit = cfg.ingest_run_limit
+
     q = MediaQueryRepo(session)
     # We want candidates that are missing either thumb or contact by default
     tuples = q.find_video_candidates_for_thumbs(

@@ -1,13 +1,16 @@
 # hexmedia/database/repos/media_query.py
 from __future__ import annotations
-from typing import Iterable, Optional, List, Tuple
+from typing import Iterable, Optional, List, Tuple, Literal, Set
 from uuid import UUID
 from sqlalchemy import select, func, and_, or_
 from sqlalchemy.orm import Session, aliased
 
 from hexmedia.database.models import (
     MediaItem as DBMediaItem,
-    MediaAsset as DBMediaAsset
+    MediaAsset as DBMediaAsset,
+    Person as DBPerson,
+    MediaPerson as DBMediaPerson,
+    Rating as DBRating,
 )
 from hexmedia.domain.entities.media_item import MediaItem as DomainMediaItem, MediaIdentity
 from hexmedia.domain.enums.media_kind import MediaKind
@@ -134,3 +137,74 @@ class MediaQueryRepo:
         from pathlib import Path
         return (media_root / rel_dir / file_name).exists()
 
+    def list_assets_for_media_item(self, media_item_id: UUID) -> list[DBMediaAsset]:
+        stmt = (
+            select(DBMediaAsset)
+            .where(DBMediaAsset.media_item_id == media_item_id)
+            .order_by(DBMediaAsset.kind.asc())
+        )
+        return self.session.execute(stmt).scalars().all()
+
+    def list_persons_for_media_item(self, media_item_id: UUID) -> list[DBPerson]:
+        stmt = (
+            select(DBPerson)
+            .join(DBMediaPerson, DBMediaPerson.person_id == DBPerson.id)
+            .where(DBMediaPerson.media_item_id == media_item_id)
+            .order_by(DBPerson.display_name.asc())
+        )
+        return self.session.execute(stmt).scalars().all()
+
+    def list_media_by_bucket(
+            self,
+            bucket: str,
+            include: Set[str] | None = None,
+    ) -> list[DBMediaItem]:
+        """
+        Return all MediaItems in a single bucket (media_folder == bucket),
+        newest first. No pagination here — assume bucket max is controlled in settings/env.
+        """
+        include = include or set()
+        stmt = (
+            select(DBMediaItem)
+            .where(DBMediaItem.media_folder == bucket)
+            .order_by(DBMediaItem.date_created.desc().nullslast())
+        )
+        rows = self.session.execute(stmt).scalars().all()
+        if not rows:
+            return []
+
+        # NOTE: We return DB models; router will attach embedded data if requested.
+        return rows
+
+    def batch_assets_for_items(self, item_ids: list[UUID]) -> dict[UUID, list[DBMediaAsset]]:
+        if not item_ids:
+            return {}
+        stmt = (
+            select(DBMediaAsset)
+            .where(DBMediaAsset.media_item_id.in_(item_ids))
+            .order_by(DBMediaAsset.kind.asc())
+        )
+        out: dict[UUID, list[DBMediaAsset]] = {}
+        for a in self.session.execute(stmt).scalars().all():
+            out.setdefault(a.media_item_id, []).append(a)
+        return out
+
+    def batch_persons_for_items(self, item_ids: list[UUID]) -> dict[UUID, list[DBPerson]]:
+        if not item_ids:
+            return {}
+        stmt = (
+            select(DBPerson, DBMediaPerson.media_item_id)
+            .join(DBMediaPerson, DBMediaPerson.person_id == DBPerson.id)
+            .where(DBMediaPerson.media_item_id.in_(item_ids))
+            .order_by(DBPerson.name.asc())
+        )
+        out: dict[UUID, list[DBPerson]] = {}
+        for person, media_item_id in self.session.execute(stmt).all():
+            out.setdefault(media_item_id, []).append(person)
+        return out
+
+    def batch_ratings_for_items(self, item_ids: list[UUID]) -> dict[UUID, int]:
+        if not item_ids:
+            return {}
+        stmt = select(DBRating.media_item_id, DBRating.score).where(DBRating.media_item_id.in_(item_ids))
+        return {mid: int(score) for (mid, score) in self.session.execute(stmt).all()}

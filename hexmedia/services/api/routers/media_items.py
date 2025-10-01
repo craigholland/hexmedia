@@ -1,11 +1,12 @@
 from __future__ import annotations
 from http import HTTPStatus
-from typing import List
+from typing import List, Set
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Path
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy import select
 
 from hexmedia.services.api.deps import transactional_session
 from hexmedia.services.schemas.media import (
@@ -16,8 +17,11 @@ from hexmedia.services.mappers.media_item import (
 )
 from hexmedia.database.models.media import MediaItem as DBMediaItem
 from hexmedia.database.repos.media_repo import SqlAlchemyMediaRepo     # mutations
-from hexmedia.database.repos.media_query import MediaQueryRepo         # queries
 from hexmedia.domain.entities.media_item import MediaIdentity
+from hexmedia.database.repos.media_query import MediaQueryRepo
+from hexmedia.services.schemas.media_cards import MediaItemCardRead
+from hexmedia.services.schemas.assets import MediaAssetRead
+from hexmedia.services.schemas.people import PersonRead
 
 router = APIRouter()
 
@@ -87,3 +91,54 @@ def create_media_item(payload: MediaItemCreate, session: Session = Depends(trans
     except ValueError as e:
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(e))
 
+def _parse_include(include: str | None) -> Set[str]:
+    if not include:
+        return set()
+    parts = [p.strip().lower() for p in include.split(",") if p.strip()]
+    allowed = {"assets", "persons", "tags", "ratings"}
+    return {p for p in parts if p in allowed}
+
+@router.get("/by-bucket/{bucket}", response_model=List[MediaItemCardRead])
+def list_media_by_bucket(
+    bucket: str = Path(..., min_length=3, max_length=3, description="media_folder bucket (e.g., '000')"),
+    include: str | None = Query(None, description="Comma list: assets,persons,tags,ratings"),
+    db: Session = Depends(transactional_session),
+) -> List[MediaItemCardRead]:
+    inc = _parse_include(include)
+    q = MediaQueryRepo(db)
+
+    rows = q.list_media_by_bucket(bucket=bucket, include=inc)
+    if rows is None:
+        raise HTTPException(status_code=404, detail="Bucket not found or empty")
+
+    item_ids = [r.id for r in rows]
+
+    assets_by_id = q.batch_assets_for_items(item_ids) if "assets" in inc else {}
+    persons_by_id = q.batch_persons_for_items(item_ids) if "persons" in inc else {}
+    ratings_by_id = q.batch_ratings_for_items(item_ids) if "ratings" in inc else {}
+    # tags_by_id = q.batch_tags_for_items(item_ids) if "tags" in inc else {}
+
+    out: List[MediaItemCardRead] = []
+    for r in rows:
+        card = MediaItemCardRead.model_validate(r)
+        if "assets" in inc:
+            aset = assets_by_id.get(r.id, [])
+            card.assets = [MediaAssetRead.model_validate(a) for a in aset]
+        if "persons" in inc:
+            ppl = persons_by_id.get(r.id, [])
+            card.persons = [PersonRead.model_validate(p) for p in ppl]
+        if "ratings" in inc:
+            card.rating = ratings_by_id.get(r.id)
+        # if "tags" in inc:
+        #     card.tags = [TagRead.model_validate(t) for t in tags_by_id.get(r.id, [])]
+        out.append(card)
+
+    return out
+
+@router.get("/buckets/order", response_model=List[str])
+def bucket_order(
+    db: Session = Depends(transactional_session),
+) -> List[str]:
+    # Extract buckets in ascending order that actually have items
+    stmt = select(DBMediaItem.media_folder).group_by(DBMediaItem.media_folder).order_by(DBMediaItem.media_folder.asc())
+    return [b for (b,) in db.execute(stmt).all() if b]
