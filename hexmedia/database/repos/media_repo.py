@@ -1,4 +1,4 @@
-# hexmedia/database/repositories/media_repo.py
+# hexmedia/database/repos/media_repo.py
 from __future__ import annotations
 
 from typing import Iterable, Optional, Any, cast
@@ -13,6 +13,8 @@ from hexmedia.database.models.media import MediaItem as DBMediaItem
 from hexmedia.domain.entities.media_item import MediaItem as DomainMediaItem, MediaIdentity
 from hexmedia.domain.enums.media_kind import MediaKind
 from hexmedia.common.logging import get_logger
+from hexmedia.database.repos._mapping import to_domain_media_item
+
 
 logger = get_logger()
 class SqlAlchemyMediaRepo:
@@ -38,25 +40,20 @@ class SqlAlchemyMediaRepo:
     # -------------------------------------------------------------------------
     def get_by_id(self, media_item_id: UUID) -> Optional[DomainMediaItem]:
         row = self.db.get(DBMediaItem, media_item_id)
-        return self._to_domain(row) if row else None
+        return to_domain_media_item(row) if row else None
 
     def get_by_identity(self, identity: MediaIdentity) -> Optional[DomainMediaItem]:
-        """
-        Accepts a MediaIdentity value object. We expect attributes:
-          - media_folder (bucket)
-          - identity_name
-        """
-        bucket = getattr(identity, "media_folder", None) or getattr(identity, "bucket", None)
-        name = getattr(identity, "identity_name", None) or getattr(identity, "name", None)
-        if not bucket or not name:
-            return None
-
-        stmt = select(DBMediaItem).where(
-            DBMediaItem.media_folder == str(bucket),
-            DBMediaItem.identity_name == str(name),
+        stmt = (
+            select(DBMediaItem)
+            .where(
+                DBMediaItem.media_folder == identity.media_folder,
+                DBMediaItem.identity_name == identity.identity_name,
+                DBMediaItem.video_ext == identity.video_ext,
+            )
+            .limit(1)
         )
         row = self.db.execute(stmt).scalars().first()
-        return self._to_domain(row) if row else None
+        return to_domain_media_item(row) if row else None
 
     def exists_hash(self, sha256: str) -> bool:
         stmt = select(func.count()).select_from(DBMediaItem).where(DBMediaItem.hash_sha256 == sha256)
@@ -125,45 +122,29 @@ class SqlAlchemyMediaRepo:
 
         return orm
 
-    def create_media_item(self, item: DomainMediaItem) -> DBMediaItem:
-        """
-        Create a new media item (no commit here). Callers control transaction boundaries.
-        """
+    def create_media_item(self, item: DomainMediaItem) -> DomainMediaItem:
         self._validate_new_item(item)
         orm = self._import_media_item(item)
         self._enforce_uniques(orm)
         self._persist_core(orm)
+        # If you need the PK right away, flush/refresh but DO NOT commit here:
+        self.db.flush()
+        self.db.refresh(orm)
         self._persist_relations(orm, item)
-        return orm
+        return to_domain_media_item(orm)
 
     def update_media_item(self, item: DomainMediaItem) -> DomainMediaItem:
-        """
-        Protocol path: takes a DomainMediaItem and persists mutable fields.
-        """
         db_row = self.db.get(DBMediaItem, cast(UUID, getattr(item, "id", None)))
         if not db_row:
             raise ValueError("MediaItem not found for update")
 
-        # Safe, conservative field sync; extend as needed
         for name in (
             "hash_sha256",
-            "duration_sec",
-            "width",
-            "height",
-            "fps",
-            "bitrate",
-            "codec_video",
-            "codec_audio",
-            "container",
-            "aspect_ratio",
-            "language",
-            "has_subtitles",
-            "title",
-            "release_year",
-            "source",
-            "watched",
-            "favorite",
-            "last_played_at",
+            "duration_sec", "width", "height", "fps", "bitrate",
+            "codec_video", "codec_audio", "container", "aspect_ratio",
+            "language", "has_subtitles",
+            "title", "release_year", "source",
+            "watched", "favorite", "last_played_at",
             "size_bytes",
         ):
             if hasattr(item, name):
@@ -171,15 +152,13 @@ class SqlAlchemyMediaRepo:
 
         self.db.flush()
         self.db.refresh(db_row)
-        self.db.commit()
-        return self._to_domain(db_row)
+        return to_domain_media_item(db_row)
 
     def delete_media_item(self, media_item_id: UUID) -> None:
         row = self.db.get(DBMediaItem, media_item_id)
         if row is None:
             return
         self.db.delete(row)
-        self.db.commit()
 
     # -------------------------------------------------------------------------
     # Internal helpers
@@ -247,40 +226,3 @@ class SqlAlchemyMediaRepo:
         self.db.commit()
         return self._to_domain(db_row)
 
-    def _to_domain(self, row: DBMediaItem) -> DomainMediaItem:
-        """
-        Minimal mapping DB -> domain entity for v1.
-        Assumes DomainMediaItem accepts these keyword args.
-        Extend this as the domain model evolves.
-        """
-        logger.warning(f"_to_domain: is 'row' None?: {row == None}")
-        entity = DomainMediaItem(
-            id=row.id,
-            kind=row.kind.value if isinstance(row.kind, MediaKind) else str(row.kind),
-            media_folder=row.media_folder,
-            identity_name=row.identity_name,
-            video_ext=row.video_ext,
-            size_bytes=row.size_bytes,
-            hash_sha256=row.hash_sha256,
-            # technical (may be None)
-            duration_sec=row.duration_sec,
-            width=row.width,
-            height=row.height,
-            fps=float(row.fps) if row.fps is not None else None,
-            bitrate=row.bitrate,
-            codec_video=row.codec_video,
-            codec_audio=row.codec_audio,
-            container=row.container,
-            aspect_ratio=row.aspect_ratio,
-            language=row.language,
-            has_subtitles=row.has_subtitles,
-            # curation
-            title=row.title,
-            release_year=row.release_year,
-            source=row.source,
-            watched=row.watched,
-            favorite=row.favorite,
-            last_played_at=row.last_played_at,
-        )
-        logger.warning(f"CRAIG: _to_domain: {entity}")
-        return entity

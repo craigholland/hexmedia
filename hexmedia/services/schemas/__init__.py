@@ -1,7 +1,7 @@
 from hexmedia.services.schemas.media import (
     MediaItemRead,
     MediaItemCreate,
-    MediaItemUpdate,
+    MediaItemPatch,
 )
 from hexmedia.services.schemas.rating import (
     RatingRead,
@@ -20,7 +20,7 @@ from hexmedia.services.schemas.taxonomy import (
 __all__ = [
     "MediaItemRead",
     "MediaItemCreate",
-    "MediaItemUpdate",
+    "MediaItemPatch",
     "RatingRead",
     "RatingCreate",
     "PersonRead",

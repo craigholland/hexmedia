@@ -63,11 +63,11 @@ class MediaItem:
     id: Optional[UUID] = None
     date_created: Optional[datetime] = None
     last_updated: Optional[datetime] = None
-    data_origin: Optional[str] = None  # provenance note
+    data_origin: Optional[str] = None
 
     # Identity
     kind: MediaKind = MediaKind.video
-    identity: MediaIdentity = None  # set in __post_init__
+    identity: MediaIdentity = None
 
     # File stats / tech
     size_bytes: int = 0

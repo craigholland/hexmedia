@@ -1,11 +1,12 @@
 from __future__ import annotations
-from typing import Iterable, Protocol, Optional
+from typing import Iterable, Protocol, Optional, runtime_checkable
 from uuid import UUID
 
 from hexmedia.domain.entities.media_item import MediaItem, MediaIdentity
 from hexmedia.domain.entities.media_asset import MediaAsset
 from hexmedia.domain.entities.media_artifact import Rating, Tag, Person
 
+@runtime_checkable
 class MediaQueryPort(Protocol):
     def get_by_id(self, media_item_id: UUID) -> Optional[MediaItem]: ...
     def get_by_identity(self, identity: MediaIdentity) -> Optional[MediaItem]: ...
