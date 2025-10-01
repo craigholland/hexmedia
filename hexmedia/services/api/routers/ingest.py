@@ -11,6 +11,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, Session
 
 from hexmedia.common.settings import get_settings
+from hexmedia.services.api.deps import transactional_session, get_db
 from hexmedia.services.schemas.ingest import (
     IngestRunRequest,
     IngestRunResponse,
@@ -19,22 +20,22 @@ from hexmedia.services.schemas.ingest import (
 from hexmedia.services.ingest.service import IngestService
 
 logger = logging.getLogger(__name__)
-router = APIRouter(prefix="/ingest", tags=["ingest"])
+router = APIRouter()
 
 # --- DB dependency ------------------------------------------------------------
 
-_cfg = get_settings()
-_engine = create_engine(_cfg.database_url, future=True, pool_pre_ping=True)
-_SessionLocal = sessionmaker(bind=_engine, autoflush=False, autocommit=False, future=True)
-
-
-def get_db() -> Iterable[Session]:
-    """FastAPI dependency that yields a SQLAlchemy Session."""
-    db = _SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
+#_cfg = get_settings()
+#_engine = create_engine(_cfg.database_url, future=True, pool_pre_ping=True)
+#_SessionLocal = sessionmaker(bind=_engine, autoflush=False, autocommit=False, future=True)
+#
+#
+# def get_db() -> Iterable[Session]:
+#     """FastAPI dependency that yields a SQLAlchemy Session."""
+#     db = _SessionLocal()
+#     try:
+#         yield db
+#     finally:
+#         db.close()
 
 
 # --- Helpers -----------------------------------------------------------------
@@ -117,7 +118,7 @@ def _report_to_response(report) -> IngestRunResponse:
     response_model=IngestRunResponse,
     summary="Build an ingest plan",
 )
-def plan_ingest(req: IngestRunRequest, db: Session = Depends(get_db)) -> IngestRunResponse:
+def plan_ingest(req: IngestRunRequest, session: Session = Depends(get_db)) -> IngestRunResponse:
     """
     Returns a planning-only view of what the ingest *would* do.
     Ignores any `dry_run=false` in the payload; this endpoint is always a dry-run.
@@ -125,7 +126,7 @@ def plan_ingest(req: IngestRunRequest, db: Session = Depends(get_db)) -> IngestR
     - Otherwise: service will auto-scan the configured `incoming_root`.
     """
     try:
-        svc = IngestService(db=db)
+        svc = IngestService(db=session)
         files = _coerce_files(req)
         report = svc.run(files, dry_run=True)
         return _report_to_response(report)
@@ -141,7 +142,7 @@ def plan_ingest(req: IngestRunRequest, db: Session = Depends(get_db)) -> IngestR
     response_model=IngestRunResponse,
     summary="Run ingest",
 )
-def run_ingest(req: IngestRunRequest, db: Session = Depends(get_db)) -> IngestRunResponse:
+def run_ingest(req: IngestRunRequest, session: Session = Depends(transactional_session)) -> IngestRunResponse:
     """
     Execute a single ingest pass.
 
@@ -151,7 +152,7 @@ def run_ingest(req: IngestRunRequest, db: Session = Depends(get_db)) -> IngestRu
       remains a separate endpoint for operators who always call `/run`.
     """
     try:
-        svc = IngestService(db=db)
+        svc = IngestService(db=session)
         files = _coerce_files(req)
         report = svc.run(files)
         return _report_to_response(report)

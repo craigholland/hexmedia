@@ -68,7 +68,7 @@ if _settings.db_schema and _settings.db_schema.lower() != "public":
             cur.execute(f'SET search_path TO "{_settings.db_schema}", public')
 
 
-SessionLocal = sessionmaker(bind=engine, expire_on_commit=False, future=True)
+SessionLocal = sessionmaker(bind=engine, expire_on_commit=False, future=True, autoflush=False)
 
 
 def get_session() -> Iterator[Session]:

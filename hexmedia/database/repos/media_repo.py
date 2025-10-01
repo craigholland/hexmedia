@@ -123,31 +123,18 @@ class SqlAlchemyMediaRepo:
             last_played_at=item.last_played_at,
         )
 
-
-
         return orm
-    def create_media_item(self, item: DomainMediaItem | None = None, **compat: Any):
+
+    def create_media_item(self, item: DomainMediaItem) -> DBMediaItem:
         """
-        Primary path (protocol):
-            create_media_item(item: DomainMediaItem)
-
-        COMPAT path (current worker callsite):
-            create_media_item(
-                kind=..., media_folder=..., identity_name=...,
-                video_ext=..., size_bytes=..., hash_sha256=?,
-            )
+        Create a new media item (no commit here). Callers control transaction boundaries.
         """
-        if item is None:
-            # COMPAT path
-            return self._create_from_kwargs(**compat)
-
-
-        db_row = self._import_media_item(item)
-
-        self.db.add(db_row)
-        self.db.flush()
-        self.db.refresh(db_row)
-        self.db.commit()
+        self._validate_new_item(item)
+        orm = self._import_media_item(item)
+        self._enforce_uniques(orm)
+        self._persist_core(orm)
+        self._persist_relations(orm, item)
+        return orm
 
     def update_media_item(self, item: DomainMediaItem) -> DomainMediaItem:
         """
@@ -197,6 +184,35 @@ class SqlAlchemyMediaRepo:
     # -------------------------------------------------------------------------
     # Internal helpers
     # -------------------------------------------------------------------------
+    def _validate_new_item(self, item: DomainMediaItem) -> None:
+        if item.identity is None:
+            raise ValueError("MediaItem.identity is required")
+        if not item.identity.video_ext:
+            raise ValueError("video_ext is required")
+
+    def _enforce_uniques(self, orm: DBMediaItem) -> None:
+        # SQL-level unique constraint exists; this pre-check gives earlier error messaging if desired
+        exists = self.db.query(DBMediaItem.id).filter_by(
+            media_folder=orm.media_folder,
+            identity_name=orm.identity_name,
+            video_ext=orm.video_ext,
+        ).first()
+        if exists:
+            raise ValueError("Media item already exists for this identity triplet")
+
+    def _persist_core(self, orm: DBMediaItem) -> DBMediaItem:
+        self.db.add(orm)
+        # Do not flush/commit here; the API transaction boundary controls commit
+        return orm
+
+    def _persist_relations(self, orm: DBMediaItem, item: DomainMediaItem) -> None:
+        # If you create assets/tags/people/rating alongside, centralize here.
+        # Example (pseudo; adapt to your current API):
+        # for asset in item.assets or []:
+        #     self.session.add(MediaAsset(media_item=orm, ...))
+        # if item.rating is not None:
+        #     self.session.merge(Rating(media_item=orm, score=item.rating))
+        pass
     def _create_from_kwargs(self, **kw: Any) -> DomainMediaItem:
         """
         Used by current IngestWorker code path.

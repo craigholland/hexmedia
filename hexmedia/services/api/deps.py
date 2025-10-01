@@ -1,15 +1,28 @@
+# hexmedia/services/api/deps.py
 from __future__ import annotations
-
 from typing import Generator
 from fastapi import Depends
-
-from hexmedia.common.settings import get_settings, Settings
-from hexmedia.database.core.main import get_session
 from sqlalchemy.orm import Session
 
-def get_settings_dep() -> Settings:
-    return get_settings()
+from hexmedia.database.core.main import SessionLocal
 
-def get_db(session_gen: Generator = Depends(get_session)) -> Session:
-    # get_session() yields a Session and handles commit/rollback in its own try/finally
-    return session_gen  # FastAPI resolves generator dependency correctly
+def get_db() -> Generator[Session, None, None]:
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+def transactional_session(db: Session = Depends(get_db)) -> Generator[Session, None, None]:
+    """
+    Request-scoped transaction. Any repo/service using this session
+    participates in the same transaction.
+
+    Usage in routers:
+      def endpoint(session: Session = Depends(transactional_session)):
+          ...
+    """
+    # Using the Session.begin() context ensures COMMIT on normal exit,
+    # and ROLLBACK if an exception bubbles out.
+    with db.begin():
+        yield db

@@ -37,7 +37,7 @@ class IngestWorker:
 
         self.repo: SqlAlchemyMediaRepo = repo or SqlAlchemyMediaRepo(db)
         self.planner = planner or IngestPlanner(query_repo=self.repo)
-        self.prober: MediaProbePort = prober or FFprobeAdapter()
+        self.prober: MediaProbePort = prober or FFprobeAdapter
 
     def run(self, files: Iterable[Path] | None, *, dry_run: bool = False) -> IngestReport:
         rpt = IngestReport()
@@ -73,9 +73,10 @@ class IngestWorker:
             probe_res = None
             # 1) probe & enrich (non-fatal on failure)
             try:
-                probe_res = self.prober.probe(src)
+                probe_res = self.prober().probe(src)
+
             except Exception as ex:
-                rpt.add_error(f"probe failed for {src}: {ex}")
+                rpt.add_error(f"IngestWorker: probe failed for {src}: {ex}")
 
             # 2) filesystem placement
             if not rpt.error_details:
@@ -83,7 +84,7 @@ class IngestWorker:
                     item_dir = ensure_item_dir(media_root, bucket, identity)
                     dest_path = move_into_item_dir(src, item_dir, identity, ext)
                 except Exception as ex:
-                    rpt.add_error(f"fs move failed for {src}: {ex}")
+                    rpt.add_error(f"IngestWorker: fs move failed for {src}: {ex}")
                     continue
 
             # 3) initial DB row
@@ -112,7 +113,7 @@ class IngestWorker:
 
                         self.repo.create_media_item(mi)
                 except Exception as ex:
-                    rpt.add_error(f"db add failed for {dest_path}: {ex}")
+                    rpt.add_error(f"IngestWorker: db add failed for {dest_path}: {ex}")
                     continue
         rpt.stop()
         return rpt

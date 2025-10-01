@@ -6,14 +6,9 @@ from pathlib import Path
 from typing import List, Optional
 from pydantic import BaseModel, Field, AliasChoices, field_validator, computed_field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from hexmedia.common.strings.splitters import csv_to_list
 
 
-def _csv_to_list(v: str | List[str] | None) -> List[str]:
-    if v is None:
-        return []
-    if isinstance(v, list):
-        return [s.strip() for s in v if s and str(s).strip()]
-    return [s.strip() for s in str(v).split(",") if s.strip()]
 
 
 def _to_bool(v: str | bool | int | None, default: bool = False) -> bool:
@@ -34,11 +29,11 @@ class APIConfig(BaseModel):
     cors_allow_methods: List[str] = Field(default_factory=lambda: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"])
     cors_allow_headers: List[str] = Field(default_factory=lambda: ["*"])
     cors_allow_credentials: bool = False
-
-    @field_validator("cors_allow_origins", "cors_allow_methods", "cors_allow_headers", mode="before")
-    @classmethod
-    def _split_csv(cls, v):
-        return _csv_to_list(v)
+    #
+    # @field_validator("cors_allow_origins", "cors_allow_methods", "cors_allow_headers", mode="before")
+    # @classmethod
+    # def _split_csv(cls, v):
+    #     return _csv_to_list(v)
 
 
 class DBConfig(BaseModel):
@@ -133,10 +128,10 @@ class Settings(BaseSettings):
     image_exts: List[str] = Field(default_factory=lambda: ["jpg", "jpeg", "png", "gif", "webp"])
     sidecar_exts: List[str] = Field(default_factory=lambda: ["vtx"])
 
-    @field_validator("video_exts", "image_exts", "sidecar_exts", mode="before")
-    @classmethod
-    def _split_csv(cls, v):
-        return _csv_to_list(v)
+    # @field_validator("video_exts", "image_exts", "sidecar_exts", mode="before")
+    # @classmethod
+    # def _split_csv(cls, v):
+    #     return _csv_to_list(v)
 
     # -------- Sub-configs --------
     api: APIConfig = APIConfig()
