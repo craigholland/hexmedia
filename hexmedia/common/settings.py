@@ -122,6 +122,7 @@ class Settings(BaseSettings):
     bucket_name_length: int = 7
     item_name_length: int = 7
     hexmedia_bucket_max: int = 2000
+    ingest_run_limit: int = Field(10, description="Default max files to plan/run per request")
 
     # -------- Allowed extensions --------
     video_exts: List[str] = Field(default_factory=lambda: ["mp4", "mov", "flv"])
@@ -164,6 +165,15 @@ class Settings(BaseSettings):
         case_sensitive=False,
         extra="ignore",
     )
+
+    # -------- Thumbnail imaging --------
+    thumb_format: str = Field("png", description="Default thumbnail image format (png|jpg|jpeg|webp)")
+    collage_format: str = Field("png", description="Default collage image format (png|jpg|jpeg|webp)")
+    thumb_width: int = Field(960, ge=64, le=4096, description="Width of single-frame thumbnails")
+    collage_tile_width: int = Field(400, ge=64, le=4096, description="Width of each tile in collage")
+    upscale_policy: str = Field("if_smaller_than", description="never|if_smaller_than|always")
+
+    MAX_THUMB_WORKERS: int = Field(8, ge=1, le=64, description="Upper bound for /thumb workers param")
 
     # ===== Derived paths =====
     @computed_field  # type: ignore[misc]

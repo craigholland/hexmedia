@@ -104,7 +104,6 @@ class MediaItem:
 
     def __post_init__(self):
         # Hydrate identity from convenience fields if caller passed them
-        logger.warning(f"CRAIG: MediaItem.__init__: media_folder {self.media_folder}")
         if self.identity is None:
             if not (self.media_folder and self.identity_name and self.video_ext):
                 raise ValueError("MediaItem requires identity triplet: media_folder, identity_name, video_ext")

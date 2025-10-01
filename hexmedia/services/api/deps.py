@@ -5,6 +5,15 @@ from fastapi import Depends
 from sqlalchemy.orm import Session
 
 from hexmedia.database.core.main import SessionLocal
+from hexmedia.domain.ports.probe import MediaProbePort
+from hexmedia.services.probe.ffprobe_adapter import FFprobeAdapter  # note the lowercase 'p' in your codebase
+
+def get_media_probe() -> MediaProbePort:
+    """
+    Provide a MediaProbePort implementation (ffprobe) via DI.
+    Swappable later if you add other probers.
+    """
+    return FFprobeAdapter()
 
 def get_db() -> Generator[Session, None, None]:
     db = SessionLocal()
