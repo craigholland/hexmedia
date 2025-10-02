@@ -1,6 +1,6 @@
 from __future__ import annotations
 from http import HTTPStatus
-from typing import List, Set, Optional
+from typing import List, Set, Dict
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Path
@@ -35,8 +35,7 @@ from hexmedia.services.schemas import (
     MediaAssetRead,
     MediaItemCardRead,
     PersonRead,
-    TagRead,
-    RatingRead
+    TagRead
 )
 cfg = get_settings()
 router = APIRouter(prefix=f"{cfg.api.prefix}/media-items", tags=["media-items"])
@@ -124,6 +123,17 @@ def bucket_order(
         .order_by(DBMediaItem.media_folder.asc())
     )
     return [b for (b,) in db.execute(stmt).all() if b]
+
+@router.get("/buckets/count", response_model=Dict[str, int])
+def bucket_counts(
+    db: Session = Depends(transactional_session),
+) -> Dict[str, int]:
+    """
+    Return a mapping of { bucket_code: item_count } for all buckets that have items.
+    Example: { "000": 42, "001": 17, "abc": 9 }
+    """
+    q = MediaQueryRepo(db)
+    return q.count_media_items_by_bucket()
 
 
 def _asset_full_url(base: str | None, media_folder: str, identity_name: str, rel_path: str) -> str | None:
