@@ -12,4 +12,7 @@ class MediaItemCardRead(MediaItemRead):
     tags: Optional[List[TagRead]] = None
     rating: Optional[int] = None
 
+    thumb_url: Optional[str] = None
+    contact_url: Optional[str] = None
+
     model_config = ConfigDict(from_attributes=True)

@@ -26,7 +26,8 @@ def search_people(
     rows = repo.search(q, limit=limit)
     return [PersonRead.model_validate(r) for r in rows]
 
-@router.get("/{person_id}", response_model=PersonRead)
+
+@router.get("/id/{person_id}", response_model=PersonRead)
 def get_person(
     person_id: UUID = Path(...),
     db: Session = Depends(transactional_session),
@@ -36,6 +37,7 @@ def get_person(
     if not obj:
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Person not found")
     return PersonRead.model_validate(obj)
+
 
 @router.post("", response_model=PersonRead, status_code=HTTPStatus.CREATED)
 def create_person(
@@ -47,7 +49,8 @@ def create_person(
     db.flush(); db.refresh(obj)
     return PersonRead.model_validate(obj)
 
-@router.patch("/{person_id}", response_model=PersonRead)
+
+@router.patch("/id/{person_id}", response_model=PersonRead)
 def update_person(
     person_id: UUID,
     payload: PersonUpdate,
@@ -61,7 +64,8 @@ def update_person(
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Person not found")
     return PersonRead.model_validate(obj)
 
-@router.delete("/{person_id}", status_code=HTTPStatus.NO_CONTENT)
+
+@router.delete("/id/{person_id}", status_code=HTTPStatus.NO_CONTENT)
 def delete_person(
     person_id: UUID,
     db: Session = Depends(transactional_session),
@@ -81,6 +85,7 @@ def list_people_for_media(
     rows = repo.list_by_media(media_item_id)
     return [PersonRead.model_validate(r) for r in rows]
 
+
 @router.post("/{person_id}/link/{media_item_id}", status_code=HTTPStatus.NO_CONTENT)
 def link_person_to_media(
     person_id: UUID,
@@ -94,6 +99,7 @@ def link_person_to_media(
     except ValueError as e:
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(e))
 
+
 @router.delete("/{person_id}/link/{media_item_id}", status_code=HTTPStatus.NO_CONTENT)
 def unlink_person_from_media(
     person_id: UUID,
@@ -104,7 +110,7 @@ def unlink_person_from_media(
     repo.unlink(media_item_id=media_item_id, person_id=person_id)
     db.flush()
 
-# (Optional) Body-based link/unlink endpoints if you prefer POST bodies over path params:
+# (Optional) Body-based link/unlink endpoints)
 
 @router.post("/link", status_code=HTTPStatus.NO_CONTENT)
 def link_person_to_media_body(
@@ -117,6 +123,7 @@ def link_person_to_media_body(
         db.flush()
     except ValueError as e:
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(e))
+
 
 @router.post("/unlink", status_code=HTTPStatus.NO_CONTENT)
 def unlink_person_from_media_body(

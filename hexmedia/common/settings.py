@@ -173,6 +173,13 @@ class Settings(BaseSettings):
 
     MAX_THUMB_WORKERS: int = Field(8, ge=1, le=64, description="Upper bound for /thumb workers param")
 
+    # -------- Public media serving (optional base URL for FE) --------
+    public_media_base_url: Optional[str] = Field(
+        default=None,
+        alias="PUBLIC_MEDIA_URL",
+        description="Absolute base URL used to serve media assets publicly (e.g. https://cdn.example.com/media)."
+    )
+
     # ===== Derived paths =====
     @computed_field  # type: ignore[misc]
     @property

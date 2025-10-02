@@ -28,5 +28,6 @@ class MediaAssetUpdate(BaseModel):
 class MediaAssetRead(MediaAssetBase):
     id: UUID
     media_item_id: UUID
+    url: Optional[str] = None
 
     model_config = ConfigDict(from_attributes=True)

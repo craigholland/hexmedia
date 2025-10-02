@@ -1,6 +1,6 @@
 from __future__ import annotations
 from http import HTTPStatus
-from typing import List, Set
+from typing import List, Set, Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Path
@@ -8,7 +8,9 @@ from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy import select
 
-from hexmedia.services.api.deps import transactional_session, get_db
+from hexmedia.common.settings import get_settings
+from hexmedia.domain.enums.asset_kind import AssetKind
+from hexmedia.services.api.deps import transactional_session
 from hexmedia.services.schemas.media import (
     MediaItemCreate, MediaItemRead, MediaItemPatch,
 )
@@ -38,6 +40,7 @@ from hexmedia.services.schemas import (
 )
 
 router = APIRouter()
+cfg = get_settings()
 
 
 
@@ -112,130 +115,134 @@ def _parse_include(include: str | None) -> Set[str]:
     allowed = {"assets", "persons", "tags", "ratings"}
     return {p for p in parts if p in allowed}
 
-@router.get("/by-bucket/{bucket}", response_model=List[MediaItemCardRead])
-def list_media_by_bucket(
-    bucket: str = Path(..., min_length=3, max_length=3, description="media_folder bucket (e.g., '000')"),
-    include: str | None = Query(None, description="Comma list: assets,persons,tags,ratings"),
-    db: Session = Depends(transactional_session),
-) -> List[MediaItemCardRead]:
-    inc = _parse_include(include)
-    q = MediaQueryRepo(db)
-
-    rows = q.list_media_by_bucket(bucket=bucket, include=inc)
-    if rows is None:
-        raise HTTPException(status_code=404, detail="Bucket not found or empty")
-
-    item_ids = [r.id for r in rows]
-
-    assets_by_id = q.batch_assets_for_items(item_ids) if "assets" in inc else {}
-    persons_by_id = q.batch_persons_for_items(item_ids) if "persons" in inc else {}
-    ratings_by_id = q.batch_ratings_for_items(item_ids) if "ratings" in inc else {}
-    # tags_by_id = q.batch_tags_for_items(item_ids) if "tags" in inc else {}
-
-    out: List[MediaItemCardRead] = []
-    for r in rows:
-        card = MediaItemCardRead.model_validate(r)
-        if "assets" in inc:
-            aset = assets_by_id.get(r.id, [])
-            card.assets = [MediaAssetRead.model_validate(a) for a in aset]
-        if "persons" in inc:
-            ppl = persons_by_id.get(r.id, [])
-            card.persons = [PersonRead.model_validate(p) for p in ppl]
-        if "ratings" in inc:
-            card.rating = ratings_by_id.get(r.id)
-        # if "tags" in inc:
-        #     card.tags = [TagRead.model_validate(t) for t in tags_by_id.get(r.id, [])]
-        out.append(card)
-
-    return out
-
 @router.get("/buckets/order", response_model=List[str])
 def bucket_order(
     db: Session = Depends(transactional_session),
 ) -> List[str]:
     # Extract buckets in ascending order that actually have items
-    stmt = select(DBMediaItem.media_folder).group_by(DBMediaItem.media_folder).order_by(DBMediaItem.media_folder.asc())
+    stmt = (
+        select(DBMediaItem.media_folder)
+        .group_by(DBMediaItem.media_folder)
+        .order_by(DBMediaItem.media_folder.asc())
+    )
     return [b for (b,) in db.execute(stmt).all() if b]
+
+
+def _asset_full_url(base: str | None, media_folder: str, identity_name: str, rel_path: str) -> str | None:
+    if not base:
+        return None
+    base = base.rstrip("/")
+    rel_dir = f"{media_folder}/{identity_name}".strip("/")
+    return f"{base}/{rel_dir}/{rel_path.lstrip('/')}"
+
 
 @router.get("/by-bucket/{bucket}", response_model=List[MediaItemCardRead])
 def get_media_items_by_bucket(
-    bucket: str,
-    include: str = Query(
-        "",
-        description="comma-separated includes: assets,persons,ratings,tags",
-        examples=["assets,persons,ratings,tags"],
-    ),
-    limit: int = Query(50, ge=1, le=500),
-    db: Session = Depends(get_db),
+    bucket: str = Path(..., min_length=3, max_length=3, description="media_folder bucket (e.g., '000')"),
+    include: str | None = Query(None, description="Comma list: assets,persons,tags,ratings"),
+    db: Session = Depends(transactional_session),
 ) -> List[MediaItemCardRead]:
     """
     Return MediaItem cards for a single bucket (media_folder), newest first.
     Supports optional includes to attach related data in one round-trip.
+    Also populates asset.url if PUBLIC_MEDIA_URL is set.
     """
-    # 1) Load core rows (this bucket, newest first, up to limit)
-    stmt = (
-        select(DBMediaItem)
-        .where(DBMediaItem.media_folder == bucket)
-        .order_by(DBMediaItem.date_created.desc().nullslast(), DBMediaItem.id.desc())
-        .limit(limit)
+    cfg = get_settings()
+    inc = _parse_include(include)
+    q = MediaQueryRepo(db)
+
+    rows = (
+        db.execute(
+            select(DBMediaItem)
+            .where(DBMediaItem.media_folder == bucket)
+            .order_by(DBMediaItem.date_created.desc().nullslast(), DBMediaItem.id.desc())
+        )
+        .scalars()
+        .all()
     )
-    rows = db.execute(stmt).scalars().all()
     if not rows:
         return []
 
-    # Base card DTOs (inherits MediaItemRead; from_attributes is enabled there)
     items: List[MediaItemCardRead] = [MediaItemCardRead.model_validate(r) for r in rows]
     ids = [it.id for it in items]
-
-    # Parse include flags
-    include_set = {s.strip().lower() for s in include.split(",") if s.strip()}
-    if not include_set or not ids:
+    if not inc or not ids:
         return items
 
-    # 2) Assets
-    if "assets" in include_set:
-        assets = (
+    # Batch-load relateds based on include flags
+    assets_by_id: dict = {}
+    persons_by_id: dict = {}
+    rating_map: dict = {}
+    tags_by_id: dict = {}
+
+    if "assets" in inc:
+        aset_rows = (
             db.execute(select(DBMediaAsset).where(DBMediaAsset.media_item_id.in_(ids)))
             .scalars()
             .all()
         )
-        assets_map: dict = {}
-        for a in assets:
-            assets_map.setdefault(a.media_item_id, []).append(a)
-        for it in items:
-            it.assets = [MediaAssetRead.model_validate(a) for a in assets_map.get(it.id, [])]
+        for a in aset_rows:
+            assets_by_id.setdefault(a.media_item_id, []).append(a)
 
-    # 3) Persons
-    if "persons" in include_set:
-        rows_p = db.execute(
+    if "persons" in inc:
+        ppl_rows = db.execute(
             select(DBMediaPerson.media_item_id, DBPerson)
             .join(DBPerson, DBPerson.id == DBMediaPerson.person_id)
             .where(DBMediaPerson.media_item_id.in_(ids))
         ).all()
-        persons_map: dict = {}
-        for mid, person in rows_p:
-            persons_map.setdefault(mid, []).append(person)
-        for it in items:
-            it.persons = [PersonRead.model_validate(p) for p in persons_map.get(it.id, [])]
+        for mid, person in ppl_rows:
+            persons_by_id.setdefault(mid, []).append(person)
 
-    # 4) Ratings
-    if "ratings" in include_set:
-        ratings = (
+    if "ratings" in inc:
+        r_rows = (
             db.execute(select(DBRating).where(DBRating.media_item_id.in_(ids)))
             .scalars()
             .all()
         )
-        rating_map = {r.media_item_id: r for r in ratings}
-        for it in items:
-            r = rating_map.get(it.id)
-            it.rating = RatingRead.model_validate(r) if r else None
+        # If you want just the score on the card, keep int; if you prefer DTO, adapt below.
+        rating_map = {r.media_item_id: int(r.score) for r in r_rows}
 
-    # 5) Tags
-    if "tags" in include_set:
+    if "tags" in inc:
         trepo = TagRepo(db)
-        tag_map = trepo.batch_tags_for_items(ids)  # Dict[UUID, List[DBTag]]
-        for it in items:
-            tags = tag_map.get(it.id) or []
-            it.tags = [TagRead.model_validate(t) for t in tags]
+        tags_by_id = trepo.batch_tags_for_items(ids)  # Dict[UUID, List[DBTag]]
+
+    # Build DTOs, attach URLs and top-level convenience fields
+    cfg = get_settings()
+    public_base = cfg.public_media_base_url
+
+    for it in items:
+        # assets (+ url, + top-level thumb/contact)
+        if "assets" in inc:
+            aset_dtos: list[MediaAssetRead] = []
+            for a in assets_by_id.get(it.id, []) or []:
+                dto = MediaAssetRead.model_validate(a)
+                dto.url = _asset_full_url(
+                    public_base,
+                    it.identity.media_folder,
+                    it.identity.identity_name,
+                    dto.rel_path,
+                )
+                aset_dtos.append(dto)
+
+                # Populate top-level convenience URLs once
+                if a.kind == AssetKind.thumb and not it.thumb_url:
+                    it.thumb_url = dto.url
+                elif a.kind == AssetKind.contact_sheet and not it.contact_url:
+                    it.contact_url = dto.url
+
+            it.assets = aset_dtos
+
+        # persons
+        if "persons" in inc:
+            it.persons = [PersonRead.model_validate(p) for p in (persons_by_id.get(it.id) or [])]
+
+        # ratings (keep as int per MediaItemCardRead schema)
+        if "ratings" in inc:
+            score = rating_map.get(it.id)
+            it.rating = int(score) if score is not None else None
+
+        # tags
+        if "tags" in inc:
+            it.tags = [TagRead.model_validate(t) for t in (tags_by_id.get(it.id) or [])]
 
     return items
+
