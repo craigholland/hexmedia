@@ -212,7 +212,7 @@ class MediaQueryRepo:
             select(DBPerson, DBMediaPerson.media_item_id)
             .join(DBMediaPerson, DBMediaPerson.person_id == DBPerson.id)
             .where(DBMediaPerson.media_item_id.in_(item_ids))
-            .order_by(DBPerson.name.asc())
+            .order_by(DBPerson.display_name.asc())
         )
         out: dict[UUID, list[DBPerson]] = {}
         for person, media_item_id in self.session.execute(stmt).all():

@@ -14,6 +14,7 @@ from hexmedia.services.api.deps import transactional_session
 from hexmedia.services.schemas.media import (
     MediaItemCreate, MediaItemRead, MediaItemPatch,
 )
+from hexmedia.database.repos._mapping import to_domain_media_item
 from hexmedia.services.mappers.media_item import (
     to_domain_from_create, to_read_schema, apply_patch_to_domain
 )
@@ -171,7 +172,13 @@ def get_media_items_by_bucket(
     if not rows:
         return []
 
-    items: List[MediaItemCardRead] = [MediaItemCardRead.model_validate(r) for r in rows]
+    domain_items = [to_domain_media_item(r) for r in rows]
+    base_read_items = [to_read_schema(d) for d in domain_items]
+    items: List[MediaItemCardRead] = [
+        MediaItemCardRead.model_validate(b.model_dump())
+        for b in base_read_items
+    ]
+
     ids = [it.id for it in items]
     if not inc or not ids:
         return items
