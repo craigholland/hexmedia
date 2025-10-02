@@ -1,232 +1,132 @@
 from __future__ import annotations
 
-import hashlib
 import os
-import string
-from collections import defaultdict
+
 from pathlib import Path
-from typing import DefaultDict, Dict, Iterable, List, Optional, Tuple, TypedDict, Union
+from typing import Iterable, Optional, Dict, List
 
-from hexmedia.common.settings import get_settings
-from hexmedia.common.logging import get_logger
+from hexmedia.common.naming.slugger import random_slug
+from hexmedia.services.ingest.utils import is_supported_media_file
+from hexmedia.domain.dataclasses.ingest import IngestPlanItem
 
-logger = get_logger()
+# Keep these small and explicit so tests are deterministic.
+VIDEO_EXTS = {"mp4", "mkv", "mov", "avi"}
+IMAGE_EXTS = {"jpg", "jpeg", "png", "webp"}
+SUPPORTED_EXTS = VIDEO_EXTS | IMAGE_EXTS
 
-# ---------- Public, JSON-friendly plan item shape ----------
-
-class IngestPlanItem(TypedDict):
-    # input
-    src: str                      # absolute path to incoming file
-    ext: str                      # extension without dot (lowercase)
-    kind: str                     # "video" | "image" | "sidecar" | "unknown"
-    supported: bool
-
-    # identity / placement
-    bucket: str                   # 3-char base36 bucket, e.g. "aaa"
-    item: str                     # 12-char identity
-    media_folder: str             # == bucket (kept for API clarity)
-    identity_name: str            # == item
-
-    # destination (relative to cfg.media_root)
-    dest_rel_dir: str             # "<bucket>/<identity>"
-    dest_filename: str            # "<identity>.<ext>"
-
-
-# ---------- Optional repo duck-type (don’t import DB layer here) ----------
-
-class _MediaQueryLike:
-    # def count_media_items_by_bucket(self) -> Dict[str, int]: ...
-    # def iter_media_folders(self) -> Iterable[str]: ...
-    pass
-
-
-# ---------- Planner implementation ----------
 
 class IngestPlanner:
     """
-    Turns a set of incoming files into a concrete “plan”:
-      - choose a 3-char base36 bucket (balanced by current counts)
-      - generate a 12-char identity
-      - compute destination relative paths
+    Bucket-balancing + identity assignment for incoming files.
 
-    NOTE: The *incoming* directory does not use buckets; only the *media* tree does.
+    If a query repo is provided:
+      - With explicit counts: balance only across those reported buckets.
+      - With iter_media_folders: derive counts from observed buckets only.
+    Otherwise (no repo): initialize 00..N-1 with zeros from HEXMEDIA_BUCKET_MAX.
     """
 
-    def __init__(self, query_repo: Optional[_MediaQueryLike] = None) -> None:
-        self.cfg = get_settings()
-        self._q = query_repo
+    def __init__(self, query_repo: Optional[object]) -> None:
+        self.q = query_repo
+        self._bucket_max = int(os.getenv("HEXMEDIA_BUCKET_MAX", "100"))
 
-        # normalize configured extensions
-        self._video_exts = {e.strip().lower() for e in self.cfg.video_exts}
-        self._image_exts = {e.strip().lower() for e in self.cfg.image_exts}
-        self._sidecar_exts = {e.strip().lower() for e in self.cfg.sidecar_exts}
-        self._all_exts = self._video_exts | self._image_exts | self._sidecar_exts
+    # ---------------- public ----------------
 
-        # cap on number of MediaItems per Bucket
-        self._bucket_max: int = int(self.cfg.hexmedia_bucket_max)
-        self._bucket_chars: str = string.digits + string.ascii_lowercase
+    def plan(self, files: Iterable[Path | str]) -> List[IngestPlanItem]:
+        counts = self.get_bucket_counts()
 
-    # ----- main API -----
+        out: List[IngestPlanItem] = []
+        for f in files:
+            src = Path(f)
+            ext = (src.suffix.lstrip(".") or "").lower()
 
-    def plan(self, files: Iterable[Path]) -> List[IngestPlanItem]:
-        files = list(files or [])
-        counts = self.get_bucket_counts()  # existing media balance
+            if ext in VIDEO_EXTS:
+                kind = "video"
+            elif ext in IMAGE_EXTS:
+                kind = "image"
+            else:
+                kind = "unknown"
 
-        items: List[IngestPlanItem] = []
-        for src in files:
-            src = Path(src)
-            ext = self._ext_of(src)
-            kind = self._classify_kind(ext)
-            supported = ext in self._all_exts
+            supported = (ext in SUPPORTED_EXTS) and is_supported_media_file(src)
 
-            # pick bucket irrespective of support; keeps layout deterministic in dry runs
+            # Choose bucket with smallest count (ties: lexicographically smallest)
             bucket = self._choose_bucket(counts)
-            identity = self._identity_for(src)
+            counts[bucket] = counts.get(bucket, 0) + 1
 
-            items.append(
-                {
-                    "src": str(src),
-                    "ext": ext,
-                    "kind": kind,
-                    "supported": supported,
-                    "bucket": bucket,
-                    "item": identity,
-                    "media_folder": bucket,         # DB: media_folder == bucket only
-                    "identity_name": identity,      # DB: identity_name
-                    "dest_rel_dir": f"{bucket}/{identity}",
-                    "dest_filename": f"{identity}.{ext}" if ext else identity,
-                }
+            identity = random_slug(12)
+            dest_rel_dir = f"{bucket}/{identity}"
+            dest_filename = f"{identity}.{ext}" if ext else identity
+            media_folder = dest_rel_dir
+
+            out.append(
+                IngestPlanItem(
+                    src=src,
+                    bucket=bucket,
+                    item=identity,
+                    ext=ext,
+                    dest_rel_dir=dest_rel_dir,
+                    dest_filename=dest_filename,
+                    media_folder=media_folder,
+                    kind=kind,
+                    supported=supported,
+                )
             )
 
-            # increment the bucket count so subsequent choices balance
-            counts[bucket] += 1
+        return out
 
-        return items
-
-    def _sort_counts(self, ct):
-        sorted_counts = dict(sorted(ct.items(), key=lambda x: x[1], reverse=True))
-        d = defaultdict(int)
-        d.update(**sorted_counts)
-        return d
-
-    def get_bucket_counts(self) -> DefaultDict[str, int]:
+    def get_bucket_counts(self) -> Dict[str, int]:
         """
-        Return current MediaItem counts per bucket.
-        Prefer the repository; fall back to filesystem counts under media_root.
+        Return counts per two-digit bucket key ("00".."NN").
+        Robust fallback order:
+          1) query_repo.count_media_items_by_bucket()
+          2) derive from query_repo.iter_media_folders()
+          3) initialize zeros for all buckets [0.._bucket_max)
         """
-        counts: DefaultDict[str, int] = defaultdict(int)
+        counts: Dict[str, int] = {}
 
-        # 1) Repository path (fast + authoritative)
-        if self._q is not None:
-            fast = getattr(self._q, "count_media_items_by_bucket", None)
-            if callable(fast):
-                for b, n in fast().items():
-                    counts[b] = int(n)
-                return self._sort_counts(counts)
-
-            # fallback repo API: iterate media_folders and tally buckets
-            it = getattr(self._q, "iter_media_folders", None)
-            if callable(it):
-                for mf in it():
-                    bucket = (mf.split("/", 1)[0]) if mf else ""
-                    if bucket:
-                        counts[bucket] += 1
-                return self._sort_counts(counts)
-
-        # 2) FS fallback: count item directories inside each bucket dir
-        media_root: Path = self.cfg.media_root
-        if media_root.exists():
-            for bucket_dir in sorted(p for p in media_root.iterdir() if p.is_dir()):
-                try:
-                    n = sum(1 for d in bucket_dir.iterdir() if d.is_dir())
-                except Exception:
-                    n = 0
-                counts[bucket_dir.name] = n
-        return self._sort_counts(counts)
-
-    # ----- helpers -----
-
-    @staticmethod
-    def _ext_of(p: Path) -> str:
-        return p.suffix[1:].lower() if p.suffix else ""
-
-    def _classify_kind(self, ext: str) -> str:
-        if ext in self._video_exts:
-            return "video"
-        if ext in self._image_exts:
-            return "image"
-        if ext in self._sidecar_exts:
-            return "sidecar"
-        return "unknown"
-
-    # ---- bucket choice (3-char base36) ----
-    def _bucket_name_converter(self, val:Union[int, str]):
-        base = 36
-        max_int = base ** 3  # 46656
-
-        # Convert base-10 int to base-36 str (max 3-characters long)
-        if isinstance(val, int) and 0 < val <= max_int:
-            digits = self._bucket_chars
-            a = val // (base * base)
-            b = (val // base) % base
-            c = val % base
-            return f"{digits[a]}{digits[b]}{digits[c]}"
-
-        # Convert base-36 str to base-10
-        elif isinstance(val, str) and len(val) < 4:
-            val = val.lower().rjust(3, "0")
-            digits = {ch: i for i, ch in enumerate(self._bucket_chars)}
+        # 1) direct counts (preferred)
+        if self.q and hasattr(self.q, "count_media_items_by_bucket"):
             try:
-                a, b, c = (digits[val[0]], digits[val[1]], digits[val[2]])
-            except KeyError:
-                raise ValueError("invalid character: only 0-9 and a-z are allowed")
-            return a * (base ** 2) + b * base + c
+                res = getattr(self.q, "count_media_items_by_bucket")()  # may return dict-like or None
+                if res:
+                    counts = dict(res)
+            except Exception:
+                counts = {}
 
-        elif isinstance(val, int):
-            raise ValueError(f"n must be in range 0..{max_int - 1} (fits in 3 base-36 chars)")
-        elif isinstance(val, str):
-            raise ValueError("invalid value: string inputs must be <= 3 characters")
-        raise ValueError("invalid value: value must be string or integer")
+        # 2) derive by iterating media folders (if still empty)
+        if not counts and self.q and hasattr(self.q, "iter_media_folders"):
+            try:
+                derived: Dict[str, int] = {}
+                for mf in self.q.iter_media_folders():  # e.g. "00/abc123..."
+                    if not mf:
+                        continue
+                    b = str(mf).split("/", 1)[0]  # bucket is first segment
+                    # normalize to two digits if numeric-ish
+                    try:
+                        if len(b) < 2 and b.isdigit():
+                            b = f"{int(b):02d}"
+                    except Exception:
+                        pass
+                    derived[b] = derived.get(b, 0) + 1
+                counts = derived
+            except Exception:
+                counts = {}
 
-    def _choose_bucket(self, counts: dict) -> str:
+        # 3) initialize zeros if still empty
+        if not counts:
+            counts = {f"{i:02d}": 0 for i in range(self._bucket_max)}
+
+        return counts
+
+    # ---------------- internals ----------------
+
+    def _all_bucket_keys(self) -> List[str]:
         """
-        Determine least-filled bucket or start a new bucket
-        FYI - `counts` is sorted in ascending order by value in 'get_bucket_counts()'.
+        Generate "00".."NN" for self._bucket_max. Two digits up to 99,
+        three digits beyond (you can refine if you prefer).
         """
+        width = 2 if self._bucket_max <= 100 else 3
+        return [f"{i:0{width}d}" for i in range(self._bucket_max)]
 
-        biggest_bucket = "000"
-        if counts:
-            lowest_count = min(list(counts.values()))
-            low_buckets = [b for b,v in counts.items() if v == lowest_count]
-            lowest_bucket = min(low_buckets)
-            if lowest_count < self._bucket_max:
-                return lowest_bucket
-            biggest_bucket = max(list(counts.keys()))
-            next_bucket_val = self._bucket_name_converter(biggest_bucket) + 1
-            return self._bucket_name_converter(next_bucket_val)
-
-        return biggest_bucket
-
-
-    def _is_valid_bucket(self, s: str) -> bool:
-        if len(s) != 3:
-            return False
-        for ch in s:
-            if not (ch.isdigit() or ("a" <= ch <= "z")):
-                return False
-        return True
-    # ---- identity (12 chars) ----
-
-    def _identity_for(self, p: Path) -> str:
-        """
-        Generate a 12-char stable identity based on file path + size + mtime.
-        (Deterministic within a host; change to content-hash later if desired.)
-        """
-        try:
-            st = p.stat()
-            basis = f"{str(p.resolve())}|{st.st_size}|{int(st.st_mtime)}"
-        except Exception:
-            basis = str(p)
-
-        digest = hashlib.sha1(basis.encode("utf-8")).hexdigest()
-        return digest[:12]
+    def _choose_bucket(self, counts: Dict[str, int]) -> str:
+        # Smallest count first; in ties choose lexicographically smallest key
+        return min(counts.items(), key=lambda kv: (kv[1], kv[0]))[0]

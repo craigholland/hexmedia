@@ -5,8 +5,8 @@ import os
 
 import pytest
 
-from hexmedia.domain.policies.ingest_planner import IngestPlanner, IngestPlanItem
-
+from hexmedia.domain.policies.ingest_planner import IngestPlanner
+from hexmedia.domain.dataclasses.ingest import IngestPlanItem
 
 def _touch(p: Path) -> Path:
     p.parent.mkdir(parents=True, exist_ok=True)

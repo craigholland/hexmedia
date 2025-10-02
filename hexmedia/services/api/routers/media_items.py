@@ -8,20 +8,34 @@ from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy import select
 
-from hexmedia.services.api.deps import transactional_session
+from hexmedia.services.api.deps import transactional_session, get_db
 from hexmedia.services.schemas.media import (
     MediaItemCreate, MediaItemRead, MediaItemPatch,
 )
 from hexmedia.services.mappers.media_item import (
-    to_domain_from_create, to_read_schema, apply_patch_to_domain,
+    to_domain_from_create, to_read_schema, apply_patch_to_domain
 )
-from hexmedia.database.models.media import MediaItem as DBMediaItem
-from hexmedia.database.repos.media_repo import SqlAlchemyMediaRepo     # mutations
+from hexmedia.database.models.media import (
+    MediaItem as DBMediaItem,
+    MediaAsset as DBMediaAsset,
+    Rating as DBRating
+)
+from hexmedia.database.models.taxonomy import (
+    Person as DBPerson,
+    MediaPerson as DBMediaPerson,
+)
+from hexmedia.database.repos.media_repo import SqlAlchemyMediaRepo
+from hexmedia.database.repos.tag_repo import TagRepo
 from hexmedia.domain.entities.media_item import MediaIdentity
 from hexmedia.database.repos.media_query import MediaQueryRepo
-from hexmedia.services.schemas.media_cards import MediaItemCardRead
-from hexmedia.services.schemas.assets import MediaAssetRead
-from hexmedia.services.schemas.people import PersonRead
+
+from hexmedia.services.schemas import (
+    MediaAssetRead,
+    MediaItemCardRead,
+    PersonRead,
+    TagRead,
+    RatingRead
+)
 
 router = APIRouter()
 
@@ -142,3 +156,86 @@ def bucket_order(
     # Extract buckets in ascending order that actually have items
     stmt = select(DBMediaItem.media_folder).group_by(DBMediaItem.media_folder).order_by(DBMediaItem.media_folder.asc())
     return [b for (b,) in db.execute(stmt).all() if b]
+
+@router.get("/by-bucket/{bucket}", response_model=List[MediaItemCardRead])
+def get_media_items_by_bucket(
+    bucket: str,
+    include: str = Query(
+        "",
+        description="comma-separated includes: assets,persons,ratings,tags",
+        examples=["assets,persons,ratings,tags"],
+    ),
+    limit: int = Query(50, ge=1, le=500),
+    db: Session = Depends(get_db),
+) -> List[MediaItemCardRead]:
+    """
+    Return MediaItem cards for a single bucket (media_folder), newest first.
+    Supports optional includes to attach related data in one round-trip.
+    """
+    # 1) Load core rows (this bucket, newest first, up to limit)
+    stmt = (
+        select(DBMediaItem)
+        .where(DBMediaItem.media_folder == bucket)
+        .order_by(DBMediaItem.date_created.desc().nullslast(), DBMediaItem.id.desc())
+        .limit(limit)
+    )
+    rows = db.execute(stmt).scalars().all()
+    if not rows:
+        return []
+
+    # Base card DTOs (inherits MediaItemRead; from_attributes is enabled there)
+    items: List[MediaItemCardRead] = [MediaItemCardRead.model_validate(r) for r in rows]
+    ids = [it.id for it in items]
+
+    # Parse include flags
+    include_set = {s.strip().lower() for s in include.split(",") if s.strip()}
+    if not include_set or not ids:
+        return items
+
+    # 2) Assets
+    if "assets" in include_set:
+        assets = (
+            db.execute(select(DBMediaAsset).where(DBMediaAsset.media_item_id.in_(ids)))
+            .scalars()
+            .all()
+        )
+        assets_map: dict = {}
+        for a in assets:
+            assets_map.setdefault(a.media_item_id, []).append(a)
+        for it in items:
+            it.assets = [MediaAssetRead.model_validate(a) for a in assets_map.get(it.id, [])]
+
+    # 3) Persons
+    if "persons" in include_set:
+        rows_p = db.execute(
+            select(DBMediaPerson.media_item_id, DBPerson)
+            .join(DBPerson, DBPerson.id == DBMediaPerson.person_id)
+            .where(DBMediaPerson.media_item_id.in_(ids))
+        ).all()
+        persons_map: dict = {}
+        for mid, person in rows_p:
+            persons_map.setdefault(mid, []).append(person)
+        for it in items:
+            it.persons = [PersonRead.model_validate(p) for p in persons_map.get(it.id, [])]
+
+    # 4) Ratings
+    if "ratings" in include_set:
+        ratings = (
+            db.execute(select(DBRating).where(DBRating.media_item_id.in_(ids)))
+            .scalars()
+            .all()
+        )
+        rating_map = {r.media_item_id: r for r in ratings}
+        for it in items:
+            r = rating_map.get(it.id)
+            it.rating = RatingRead.model_validate(r) if r else None
+
+    # 5) Tags
+    if "tags" in include_set:
+        trepo = TagRepo(db)
+        tag_map = trepo.batch_tags_for_items(ids)  # Dict[UUID, List[DBTag]]
+        for it in items:
+            tags = tag_map.get(it.id) or []
+            it.tags = [TagRead.model_validate(t) for t in tags]
+
+    return items

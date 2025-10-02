@@ -1,10 +1,10 @@
 # hexmedia/database/repos/media_repo.py
 from __future__ import annotations
 
-from typing import Iterable, Optional, Any, cast
+from typing import Iterable, Optional, Any, Union, overload
 from uuid import UUID
 
-from sqlalchemy import select, func
+from sqlalchemy import select, func, delete as sa_delete
 from sqlalchemy.orm import Session
 
 # DB models
@@ -73,25 +73,14 @@ class SqlAlchemyMediaRepo:
     # -------------------------------------------------------------------------
     def _import_media_item(self, item: DomainMediaItem) -> DBMediaItem:
         """
-        Build a new ORM MediaItem from a domain-level MediaItem.
-        NOTE: This does not add/flush/commit the instance. Caller decides persistence.
-
-        Raises:
-            ValueError: if the domain item is missing identity.
+        Build an ORM MediaItem from the domain entity.
         """
-        if item.identity is None:
-            raise ValueError("Domain MediaItem.identity must be set before import")
-
         orm = DBMediaItem(
-            # identity triplet
             media_folder=item.identity.media_folder,
             identity_name=item.identity.identity_name,
             video_ext=item.identity.video_ext,
+            kind=item.kind or MediaKind.video,
 
-            # enum
-            kind=item.kind,
-
-            # file stats / tech
             size_bytes=item.size_bytes or 0,
             created_ts=item.created_ts,
             modified_ts=item.modified_ts,
@@ -109,56 +98,125 @@ class SqlAlchemyMediaRepo:
             container=item.container,
             aspect_ratio=item.aspect_ratio,
             language=item.language,
-            has_subtitles=bool(item.has_subtitles),
+            has_subtitles=item.has_subtitles or False,
 
-            # curation
             title=item.title,
             release_year=item.release_year,
             source=item.source,
-            watched=bool(item.watched),
-            favorite=bool(item.favorite),
+            watched=item.watched or False,
+            favorite=item.favorite or False,
             last_played_at=item.last_played_at,
         )
-
         return orm
 
-    def create_media_item(self, item: DomainMediaItem) -> DomainMediaItem:
-        self._validate_new_item(item)
+    def create_media_item(self, item: DomainMediaItem) -> DBMediaItem:
+        # Uniqueness check on the triplet
+        mf = item.identity.media_folder
+        nm = item.identity.identity_name
+        vx = item.identity.video_ext
+
+        exists_stmt = (
+            select(func.count())
+            .select_from(DBMediaItem)
+            .where(
+                DBMediaItem.media_folder == mf,
+                DBMediaItem.identity_name == nm,
+                DBMediaItem.video_ext == vx,
+            )
+        )
+        already = self.db.execute(exists_stmt).scalar_one()
+        if already:
+            raise ValueError(
+                f"MediaItem already exists for triplet ({mf}/{nm}.{vx})"
+            )
+
         orm = self._import_media_item(item)
-        self._enforce_uniques(orm)
-        self._persist_core(orm)
-        # If you need the PK right away, flush/refresh but DO NOT commit here:
+        self.db.add(orm)
+        # caller controls flush/commit
+        return orm
+
+    def _apply_domain_to_orm(self, orm: DBMediaItem, dom: DomainMediaItem) -> None:
+        # Copy over updatable fields (expand as you like)
+        orm.title = dom.title
+        orm.watched = dom.watched
+        orm.favorite = dom.favorite
+        orm.last_played_at = dom.last_played_at
+
+        # tech/details (only if you intend these to be mutable)
+        orm.duration_sec = dom.duration_sec
+        orm.width = dom.width
+        orm.height = dom.height
+        orm.fps = dom.fps
+        orm.bitrate = dom.bitrate
+        orm.codec_video = dom.codec_video
+        orm.codec_audio = dom.codec_audio
+        orm.container = dom.container
+        orm.aspect_ratio = dom.aspect_ratio
+        orm.language = dom.language
+        orm.has_subtitles = dom.has_subtitles
+
+        # file stats (optional)
+        orm.size_bytes = dom.size_bytes
+        orm.created_ts = dom.created_ts
+        orm.modified_ts = dom.modified_ts
+        orm.hash_sha256 = dom.hash_sha256
+        orm.phash = dom.phash
+
+    @overload
+    def update_media_item(self, item: DomainMediaItem, updates: None = None) -> Optional[DBMediaItem]:
+        ...
+
+    @overload
+    def update_media_item(self, item: UUID, updates: dict) -> Optional[DBMediaItem]:
+        ...
+
+    def update_media_item(
+            self,
+            item: Union[DomainMediaItem, UUID],
+            updates: dict | None = None,
+    ) -> Optional[DBMediaItem]:
+        """
+        - If 'item' is a DomainMediaItem -> update by its id using fields from the domain object
+        - If 'item' is a UUID          -> apply 'updates' dict to that row
+        Returns the ORM row or None if not found.
+        """
+        if isinstance(item, DomainMediaItem):
+            if not item.id:
+                return None
+            orm = self.db.get(DBMediaItem, item.id)
+            if not orm:
+                return None
+            self._apply_domain_to_orm(orm, item)
+            return orm
+
+        # UUID path
+        media_item_id: UUID = item
+        orm = self.db.get(DBMediaItem, media_item_id)
+        if not orm:
+            return None
+        if updates:
+            for k, v in updates.items():
+                setattr(orm, k, v)
+        return orm
+
+    def delete_media_item(self, media_item_id: UUID) -> bool:
+        """
+        Delete the media item and make the deletion visible immediately within
+        the same Session (tests call Session.get() right after).
+        """
+        obj = self.db.get(DBMediaItem, media_item_id)
+        if not obj:
+            return False
+
+        # Mark as deleted, persist to DB, and evict from identity map so .get(...) returns None
+        self.db.delete(obj)
         self.db.flush()
-        self.db.refresh(orm)
-        self._persist_relations(orm, item)
-        return to_domain_media_item(orm)
-
-    def update_media_item(self, item: DomainMediaItem) -> DomainMediaItem:
-        db_row = self.db.get(DBMediaItem, cast(UUID, getattr(item, "id", None)))
-        if not db_row:
-            raise ValueError("MediaItem not found for update")
-
-        for name in (
-            "hash_sha256",
-            "duration_sec", "width", "height", "fps", "bitrate",
-            "codec_video", "codec_audio", "container", "aspect_ratio",
-            "language", "has_subtitles",
-            "title", "release_year", "source",
-            "watched", "favorite", "last_played_at",
-            "size_bytes",
-        ):
-            if hasattr(item, name):
-                setattr(db_row, name, getattr(item, name))
-
-        self.db.flush()
-        self.db.refresh(db_row)
-        return to_domain_media_item(db_row)
-
-    def delete_media_item(self, media_item_id: UUID) -> None:
-        row = self.db.get(DBMediaItem, media_item_id)
-        if row is None:
-            return
-        self.db.delete(row)
+        try:
+            self.db.expunge(obj)
+        except Exception:
+            # safe guard; expunge may raise if state already detached
+            pass
+        return True
 
     # -------------------------------------------------------------------------
     # Internal helpers

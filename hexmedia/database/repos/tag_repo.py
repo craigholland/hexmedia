@@ -6,6 +6,8 @@ from sqlalchemy.orm import Session
 
 from hexmedia.database.models.taxonomy import Tag, TagGroup, MediaTag
 from hexmedia.common.naming.slugger import slugify
+from hexmedia.domain.enums import Cardinality
+
 
 class TagRepo:
     def __init__(self, db: Session) -> None:
@@ -43,7 +45,7 @@ class TagRepo:
         *,
         key: str,
         display_name: Optional[str] = None,
-        cardinality: str = "multi",
+        cardinality: Cardinality = Cardinality.MULTI,
         description: Optional[str] = None,
         parent_id: Optional[UUID] = None,
         parent_path: Optional[str] = None,
@@ -162,22 +164,22 @@ class TagRepo:
         self.db.add(t)
         return t
 
-    def find_or_create_path(self, group_path: str, path: Iterable[str]) -> Tag:
-        grp = self.resolve_group_path(group_path)
-        if not grp:
-            raise ValueError("TagGroup not found")
-        parent = None
-        for part in path:
-            s = slugify(part)
-            stmt = select(Tag).where(and_(Tag.group_id == grp.id, Tag.slug == s, Tag.parent_id == (parent.id if parent else None))).limit(1)
-            existing = self.db.execute(stmt).scalars().first()
-            if existing:
-                parent = existing
-            else:
-                parent = Tag(group_id=grp.id, name=part, slug=s, parent_id=(parent.id if parent else None))
-                self.db.add(parent)
-                self.db.flush()
-        return parent
+    # def find_or_create_path(self, group_path: str, path: Iterable[str]) -> Tag:
+    #     grp = self.resolve_group_path(group_path)
+    #     if not grp:
+    #         raise ValueError("TagGroup not found")
+    #     parent = None
+    #     for part in path:
+    #         s = slugify(part)
+    #         stmt = select(Tag).where(and_(Tag.group_id == grp.id, Tag.slug == s, Tag.parent_id == (parent.id if parent else None))).limit(1)
+    #         existing = self.db.execute(stmt).scalars().first()
+    #         if existing:
+    #             parent = existing
+    #         else:
+    #             parent = Tag(group_id=grp.id, name=part, slug=s, parent_id=(parent.id if parent else None))
+    #             self.db.add(parent)
+    #             self.db.flush()
+    #     return parent
 
 
     def list_groups(self) -> List[TagGroup]:
@@ -188,8 +190,6 @@ class TagRepo:
         stmt = select(TagGroup).where(func.lower(TagGroup.key) == key.lower())
         return self.db.execute(stmt).scalars().first()
 
-
-
     # ----- tags -----
     def list_tags(self, group_key: Optional[str] = None) -> List[Tag]:
         stmt = select(Tag)
@@ -199,8 +199,6 @@ class TagRepo:
                 return []
             stmt = stmt.where(Tag.group_id == grp.id)
         return self.db.execute(stmt.order_by(Tag.slug.asc())).scalars().all()
-
-
 
     def find_or_create_path(self, group_key: str, path: Iterable[str]) -> Tag:
         """Ensure a hierarchical tag path exists under group; returns leaf tag."""
@@ -237,3 +235,33 @@ class TagRepo:
     def remove_tag_from_media(self, media_item_id: UUID, tag_id: UUID) -> None:
         from sqlalchemy import delete
         self.db.execute(delete(MediaTag).where(and_(MediaTag.media_item_id == media_item_id, MediaTag.tag_id == tag_id)))
+
+    def list_for_media(self, media_item_id: UUID) -> List[Tag]:
+        """
+        Tags for a single media item.
+        """
+        stmt = (
+            select(Tag)
+            .join(MediaTag, MediaTag.tag_id == Tag.id)
+            .where(MediaTag.media_item_id == media_item_id)
+            .order_by(Tag.name.asc())
+        )
+        return [row[0] for row in self.db.execute(stmt).all()]
+
+    def batch_tags_for_items(self, media_item_ids: Iterable[UUID]) -> Dict[UUID, List[Tag]]:
+        """
+        Map of media_item_id -> [Tag] for a list of items.
+        """
+        ids = list(media_item_ids)
+        if not ids:
+            return {}
+        stmt = (
+            select(MediaTag.media_item_id, Tag)
+            .join(Tag, Tag.id == MediaTag.tag_id)
+            .where(MediaTag.media_item_id.in_(ids))
+            .order_by(MediaTag.media_item_id.asc(), Tag.name.asc())
+        )
+        out: Dict[UUID, List[Tag]] = {}
+        for mid, tag in self.db.execute(stmt).all():
+            out.setdefault(mid, []).append(tag)
+        return out

@@ -47,14 +47,16 @@ class ThumbService:
         tile_width: int,
         upscale_policy: str,
     ) -> ThumbRunReport:
-        rep = ThumbRunReport(); rep.start()
+        rep = ThumbRunReport()
+        rep.start()
 
-        # candidates
+        # 1) Get candidates
         cands = self.q.find_video_candidates_for_thumbs(limit=limit, regenerate=regenerate)
         if not cands:
-            rep.stop(); return rep
+            rep.stop()
+            return rep
 
-        # worker
+        # 2) Build worker
         tw = ThumbWorker(
             media_root=self.cfg.media_root,
             query_repo=self.q,
@@ -68,43 +70,40 @@ class ThumbService:
             upscale_policy=upscale_policy or self.cfg.UPSCALE_POLICY,
         )
 
-        # parallel
         max_workers = min(workers or 1, self.cfg.MAX_THUMB_WORKERS)
+        rep.scanned = len(cands)
 
-        rep = ThumbRunReport();
-        rep.start()
-
-        results = []
+        # 3) Fan out → aggregate results
         with ThreadPoolExecutor(max_workers=max_workers) as pool:
-            futures = {
-                pool.submit(tw.process_one, mid, rel_dir, fname): (mid, rel_dir, fname)
+            futures = [
+                pool.submit(tw.process_one, mid, rel_dir, fname)
                 for (mid, rel_dir, fname) in cands
-            }
+            ]
             for fut in as_completed(futures):
                 try:
-                    out = fut.result()
-                    results.append((futures[fut][0], out))  # (media_item_id, out)
-                    rep.scanned += 1
-                    rep.generated += out.get("generated", 0)
-                    rep.skipped += out.get("skipped", 0)
-                    rep.errors += out.get("errors", 0)
-                except Exception as ex:
-                    rep.scanned += 1
+                    r = fut.result()
+                except Exception as e:
                     rep.errors += 1
-                    rep.error_details.append(str(ex))
+                    rep.error_details.append(str(e))
+                    continue
 
-        # --- Main thread: perform DB writes ---
-        for media_item_id, out in results:
-            for asset in out.get("assets", []):
-                kind = AssetKind(asset["kind"])  # "thumb" | "contact_sheet"
-                self.w.upsert_asset(
-                    media_item_id=media_item_id,
-                    kind=kind,
-                    rel_path=asset["rel_path"],
-                    width=asset["width"],
-                    height=asset["height"],
-                )
-                rep.updated += 0  # already counted above; keep if you prefer to count here
+                # tolerate workers returning None or non-dicts
+                if not isinstance(r, dict):
+                    continue
+
+                # aggregate safely with defaults
+                rep.generated += int(r.get("generated", 0) or 0)
+                rep.updated  += int(r.get("updated", 0) or 0)
+                rep.skipped  += int(r.get("skipped", 0) or 0)
+                rep.errors   += int(r.get("errors", 0) or 0)
+
+                # optional error fields from workers
+                err = r.get("error") or r.get("error_detail") or r.get("error_details")
+                if err:
+                    if isinstance(err, (list, tuple)):
+                        rep.error_details.extend(map(str, err))
+                    else:
+                        rep.error_details.append(str(err))
 
         rep.stop()
         return rep

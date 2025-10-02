@@ -76,54 +76,57 @@ class MediaQueryRepo:
     def count_media_items(self) -> int:
         return int(self.session.execute(select(func.count()).select_from(DBMediaItem)).scalar_one())
 
-    def find_video_candidates_for_thumbs(self, *, limit: int, regenerate: bool, missing: Literal["both", "either"] = "both") -> list[tuple[str, str, str]]:
+    def find_video_candidates_for_thumbs(self, *, limit: int, regenerate: bool) -> list[tuple[str, str, str]]:
         """
         Return up to `limit` tuples: (media_item_id, rel_dir, file_name)
 
-        - regenerate=True  -> include all videos
-        - regenerate=False -> include only videos missing assets per `missing`:
-            • "both"   => missing BOTH thumb AND contact_sheet (current default)
-            • "either" => missing EITHER thumb OR contact_sheet
+        - regenerate == True  -> include ALL videos
+        - regenerate == False -> include videos missing EITHER thumb OR contact_sheet
+
+        rel_dir   = "<media_folder>/<identity_name>"
+        file_name = "<identity_name>.<video_ext>"
         """
         MI = DBMediaItem
         MA = DBMediaAsset
 
-        base = select(
-            MI.id,
-            MI.media_folder,
-            MI.identity_name,
-            MI.video_ext,
-        ).where(MI.kind == MediaKind.video)
+        base = (
+            select(MI.id, MI.media_folder, MI.identity_name, MI.video_ext)
+            .where(MI.kind == MediaKind.video)
+        )
 
         if regenerate:
-            stmt = base.order_by(MI.date_created.desc().nullslast()).limit(limit)
+            stmt = (
+                base
+                .order_by(MI.date_created.desc().nullslast())
+                .limit(limit)
+            )
         else:
             Thumb = aliased(MA)
             Sheet = aliased(MA)
 
             stmt = (
                 base
+                # left join for the thumb asset of this item
                 .outerjoin(
                     Thumb,
                     and_(
                         Thumb.media_item_id == MI.id,
-                        Thumb.kind == AssetKind.thumb,  # adjust if enum differs
+                        Thumb.kind == AssetKind.thumb,
                     ),
                 )
+                # left join for the contact sheet asset of this item
                 .outerjoin(
                     Sheet,
                     and_(
                         Sheet.media_item_id == MI.id,
-                        Sheet.kind == AssetKind.contact_sheet,  # adjust if needed
+                        Sheet.kind == AssetKind.contact_sheet,
                     ),
                 )
+                # include if EITHER is missing
+                .where(or_(Thumb.id.is_(None), Sheet.id.is_(None)))
+                .order_by(MI.date_created.desc().nullslast())
+                .limit(limit)
             )
-            if missing == "either":
-                stmt = stmt.where(or_(Thumb.id.is_(None), Sheet.id.is_(None)))
-            else:  # "both"
-                stmt = stmt.where(and_(Thumb.id.is_(None), Sheet.id.is_(None)))
-            stmt = stmt.order_by(MI.date_created.desc().nullslast()).limit(limit)
-
 
         rows: List[Tuple[str, str, str, str]] = self.session.execute(stmt).all()
         out: list[tuple[str, str, str]] = []

@@ -1,7 +1,7 @@
 # hexmedia/domain/entities/media_item.py
 from __future__ import annotations
 
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, InitVar
 from datetime import datetime
 from typing import Optional, Tuple
 from uuid import UUID
@@ -10,6 +10,7 @@ from hexmedia.domain.enums.media_kind import MediaKind
 from hexmedia.common.logging import get_logger
 
 logger = get_logger()
+
 
 @dataclass(frozen=True)
 class MediaIdentity:
@@ -58,16 +59,22 @@ class MediaItem:
       - size and dimensions non-negative when provided
     More involved rules (e.g., "one asset per kind", "rating singleton")
     are enforced at the DB/policy layer to keep entities lean.
+
+    Option B:
+    ---------
+    We accept an explicit MediaIdentity OR an InitVar triplet
+    (media_folder_in, identity_name_in, video_ext_in) to hydrate identity.
     """
+
     # Persistence (optional)
     id: Optional[UUID] = None
     date_created: Optional[datetime] = None
     last_updated: Optional[datetime] = None
-    data_origin: Optional[str] = None
+    data_origin: Optional[str] = None  # provenance note
 
     # Identity
     kind: MediaKind = MediaKind.video
-    identity: MediaIdentity = None
+    identity: Optional[MediaIdentity] = None
 
     # File stats / tech
     size_bytes: int = 0
@@ -97,21 +104,26 @@ class MediaItem:
     favorite: bool = False
     last_played_at: Optional[datetime] = None
 
-    # --- constructor args for identity (ergonomic) ---
-    media_folder: Optional[str] = None
-    identity_name: Optional[str] = None
-    video_ext: Optional[str] = None
+    # --- InitVar triplet for ergonomic construction (kept OUT of dataclass fields) ---
+    media_folder_in: InitVar[Optional[str]] = None
+    identity_name_in: InitVar[Optional[str]] = None
+    video_ext_in: InitVar[Optional[str]] = None
 
-    def __post_init__(self):
-        # Hydrate identity from convenience fields if caller passed them
+    def __post_init__(self, media_folder_in, identity_name_in, video_ext_in):
+        # Hydrate identity from InitVars if not provided explicitly
         if self.identity is None:
-            if not (self.media_folder and self.identity_name and self.video_ext):
-                raise ValueError("MediaItem requires identity triplet: media_folder, identity_name, video_ext")
-            self.identity = MediaIdentity(
-                media_folder=self.media_folder,
-                identity_name=self.identity_name,
-                video_ext=self.video_ext,
-            )
+            if media_folder_in and identity_name_in and video_ext_in:
+                self.identity = MediaIdentity(
+                    media_folder=str(media_folder_in),
+                    identity_name=str(identity_name_in),
+                    video_ext=str(video_ext_in),
+                )
+            else:
+                raise ValueError(
+                    "MediaItem requires identity (MediaIdentity) or the full triplet via "
+                    "media_folder_in / identity_name_in / video_ext_in"
+                )
+
         # basic sanity checks
         if self.size_bytes is not None and self.size_bytes < 0:
             raise ValueError("size_bytes must be >= 0")
@@ -124,41 +136,28 @@ class MediaItem:
         if self.bitrate is not None and self.bitrate < 0:
             raise ValueError("bitrate must be >= 0")
 
-    # ---- Identity helpers -------------------------------------------------
+    # ---- Identity helpers (proxies) ----------------------------------------
 
     @property
-    def media_folder(self) -> str:  # type: ignore[override]
-        return self.identity.media_folder
-
-    @media_folder.setter
-    def media_folder(self, value: Optional[str]) -> None:  # ignore in dataclass init
-        # no-op; dataclass injector uses this name; actual storage is in identity
-        pass
+    def media_folder(self) -> str:
+        return self.identity.media_folder  # type: ignore[union-attr]
 
     @property
-    def identity_name(self) -> str:  # type: ignore[override]
-        return self.identity.identity_name
-
-    @identity_name.setter
-    def identity_name(self, value: Optional[str]) -> None:
-        pass
+    def identity_name(self) -> str:
+        return self.identity.identity_name  # type: ignore[union-attr]
 
     @property
-    def video_ext(self) -> str:  # type: ignore[override]
-        return self.identity.video_ext
-
-    @video_ext.setter
-    def video_ext(self, value: Optional[str]) -> None:
-        pass
+    def video_ext(self) -> str:
+        return self.identity.video_ext  # type: ignore[union-attr]
 
     def identity_key(self) -> Tuple[str, str, str]:
-        return self.identity.as_key()
+        return self.identity.as_key()  # type: ignore[union-attr]
 
     def video_rel_path(self) -> str:
-        return self.identity.video_rel_path()
+        return self.identity.video_rel_path()  # type: ignore[union-attr]
 
     def assets_rel_dir(self) -> str:
-        return self.identity.assets_rel_dir()
+        return self.identity.assets_rel_dir()  # type: ignore[union-attr]
 
     def as_dict(self):
         return asdict(self)

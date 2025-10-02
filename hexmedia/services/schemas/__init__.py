@@ -22,7 +22,13 @@ from hexmedia.services.schemas.tags import (
     TagGroupMove,
     TagGroupCreate
 )
-
+from hexmedia.services.schemas.assets import (
+    MediaAssetRead,
+    MediaAssetCreate
+)
+from hexmedia.services.schemas.media_cards import (
+    MediaItemCardRead
+)
 __all__ = [
     "MediaItemRead",
     "MediaItemCreate",
@@ -37,5 +43,8 @@ __all__ = [
     "TagUpdate",
     "TagGroupNode",
     "TagGroupMove",
-    "TagGroupCreate"
+    "TagGroupCreate",
+    "MediaAssetRead",
+    "MediaAssetCreate",
+    "MediaItemCardRead"
 ]

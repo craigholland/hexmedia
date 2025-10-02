@@ -39,6 +39,11 @@ class Tag(ServiceObject, Base):
     group: Mapped[Optional["TagGroup"]] = relationship(back_populates="tags")
     parent: Mapped[Optional["Tag"]] = relationship(remote_side="Tag.id")
     children: Mapped[List["Tag"]] = relationship()
+    media_items = relationship(
+        "MediaItem",
+        secondary="hexmedia.media_tag",
+        back_populates="tags",
+    )
 
 
 class MediaTag(Base):

@@ -59,7 +59,14 @@ class IngestWorker:
         media_root = self.cfg.media_root
 
         for item in plan:
-            if not item.get("supported"):
+            def get_field(name: str):
+                if hasattr(item, name):
+                    return getattr(item, name)
+                if isinstance(item, dict):
+                    return item.get(name)
+                return None
+
+            if not bool(get_field("supported")):
                 continue
 
             src = Path(item["src"])
