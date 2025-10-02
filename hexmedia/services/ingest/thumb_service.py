@@ -11,7 +11,7 @@ from hexmedia.common.settings import get_settings
 from hexmedia.database.repos.media_asset_repo import SqlAlchemyMediaAssetRepo
 from hexmedia.database.repos.media_query import MediaQueryRepo
 from hexmedia.services.ingest.thumb_worker import ThumbWorker
-from hexmedia.domain.enums.asset_kind import AssetKind
+
 
 @dataclass
 class ThumbRunReport:
@@ -63,14 +63,14 @@ class ThumbService:
             asset_repo=self.w,
             regenerate=regenerate,
             include_missing=include_missing,
-            thumb_format=thumb_format or self.cfg.THUMB_FORMAT,
-            collage_format=(collage_format or thumb_format or self.cfg.COLLAGE_FORMAT),
-            thumb_width=thumb_width or self.cfg.THUMB_WIDTH,
-            tile_width=tile_width or self.cfg.COLLAGE_TILE_WIDTH,
-            upscale_policy=upscale_policy or self.cfg.UPSCALE_POLICY,
+            thumb_format=thumb_format or self.cfg.thumb_format,
+            collage_format=(collage_format or thumb_format or self.cfg.collage_format),
+            thumb_width=thumb_width or self.cfg.thumb_width,
+            tile_width=tile_width or self.cfg.collage_tile_width,
+            upscale_policy=upscale_policy or self.cfg.upscale_policy,
         )
 
-        max_workers = min(workers or 1, self.cfg.MAX_THUMB_WORKERS)
+        max_workers = min(workers or 1, self.cfg.max_thumb_workers)
         rep.scanned = len(cands)
 
         # 3) Fan out → aggregate results

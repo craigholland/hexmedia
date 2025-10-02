@@ -11,8 +11,10 @@ from hexmedia.database.repos.people_repo import SqlAlchemyPeopleRepo
 from hexmedia.services.schemas.people import (
     PersonRead, PersonCreate, PersonUpdate, PersonLinkPayload
 )
+from hexmedia.common.settings import get_settings
 
-router = APIRouter(prefix="/api/people", tags=["people"])
+cfg = get_settings()
+router = APIRouter(prefix=f"{cfg.api.prefix}/people", tags=["people"])
 
 # ---------- People (CRUD) ----------
 

@@ -7,8 +7,10 @@ from sqlalchemy.orm import Session
 from hexmedia.database.models.media import MediaItem, Rating
 from hexmedia.services.schemas import RatingCreate, RatingRead
 from hexmedia.services.api.deps import transactional_session
+from hexmedia.common.settings import get_settings
 
-router = APIRouter()
+cfg = get_settings()
+router = APIRouter(prefix=f"{cfg.api.prefix}/ratings", tags=["ratings"])
 
 def _to_out(r: Rating) -> RatingRead:
     return RatingRead.model_validate(r)

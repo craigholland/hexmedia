@@ -38,10 +38,8 @@ from hexmedia.services.schemas import (
     TagRead,
     RatingRead
 )
-
-router = APIRouter()
 cfg = get_settings()
-
+router = APIRouter(prefix=f"{cfg.api.prefix}/media-items", tags=["media-items"])
 
 
 @router.get("/by-identity", response_model=MediaItemRead)

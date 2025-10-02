@@ -26,13 +26,13 @@ def create_app() -> FastAPI:
     )
 
     # Routers
-    app.include_router(media_items.router, prefix=f"{cfg.api.prefix}/media-items", tags=["media-items"])
-    app.include_router(ratings.router, prefix=f"{cfg.api.prefix}/ratings", tags=["ratings"])
-    app.include_router(tags.router, prefix=f"{cfg.api.prefix}/tags", tags=["tags"])
-    app.include_router(people.router, prefix=f"{cfg.api.prefix}/people", tags=["people"])
-    app.include_router(ingest.router, prefix=f"{cfg.api.prefix}/ingest", tags=["ingest"])
+    app.include_router(media_items.router)
+    app.include_router(ratings.router)
+    app.include_router(tags.router)
+    app.include_router(people.router)
+    app.include_router(ingest.router)
 
-    app.include_router(assets.router, prefix=f"{cfg.api.prefix}/assets", tags=["assets"])
+    app.include_router(assets.router)
     return app
 
 app = create_app()

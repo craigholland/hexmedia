@@ -23,9 +23,9 @@ from hexmedia.services.schemas.thumbs import ThumbRequest, ThumbResponse, ThumbP
 from hexmedia.services.ingest.thumb_service import ThumbService
 from hexmedia.database.repos.media_query import MediaQueryRepo
 
-router = APIRouter(prefix="/api/ingest", tags=["ingest"])
-cfg = get_settings()
 
+cfg = get_settings()
+router = APIRouter(prefix=f"{cfg.api.prefix}/ingest", tags=["ingest"])
 
 @router.post("/plan", response_model=list[IngestPlanItemSchema])
 def plan_ingest(
@@ -61,7 +61,7 @@ def generate_thumbs(
 ) -> ThumbResponse:
     settings = get_settings()
     workers = req.workers if req.workers is not None else 1
-    workers = max(1, min(workers, settings.MAX_THUMB_WORKERS))
+    workers = max(1, min(workers, settings.max_thumb_workers))
 
     svc = ThumbService(session)
     rep = svc.run(
@@ -69,11 +69,11 @@ def generate_thumbs(
         workers=workers,
         regenerate=req.regenerate,
         include_missing=req.include_missing,
-        thumb_format=req.thumb_format or settings.THUMB_FORMAT,
-        collage_format=(req.collage_format or req.thumb_format or settings.COLLAGE_FORMAT),
-        thumb_width=req.thumb_width or settings.THUMB_WIDTH,
-        tile_width=req.tile_width or settings.COLLAGE_TILE_WIDTH,
-        upscale_policy=req.upscale_policy or settings.UPSCALE_POLICY,
+        thumb_format=req.thumb_format or settings.thumb_format,
+        collage_format=(req.collage_format or req.thumb_format or settings.collage_format),
+        thumb_width=req.thumb_width or settings.thumb_width,
+        tile_width=req.tile_width or settings.collage_tile_width,
+        upscale_policy=req.upscale_policy or settings.upscale_policy,
     )
     return ThumbResponse(
         started_at=rep.started_at,

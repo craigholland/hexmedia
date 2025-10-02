@@ -16,8 +16,8 @@ from hexmedia.database.repos.media_asset_repo import SqlAlchemyMediaAssetRepo
 from hexmedia.services.schemas.assets import (
     MediaAssetRead, MediaAssetCreate, MediaAssetUpdate
 )
-
-router = APIRouter(prefix="/api/assets", tags=["assets"])
+cfg = get_settings()
+router = APIRouter(prefix=f"{cfg.api.prefix}/assets", tags=["assets"])
 
 def _asset_url_for(
     *, cfg, item: DBMediaItem | None, rel_path: str
@@ -145,9 +145,7 @@ def patch_asset(
     dto.url = _asset_url_for(cfg=cfg, item=parent, rel_path=dto.rel_path)
     return dto
 
-
-
-@router.delete("/id/{asset_id}", status_code=HTTPStatus.NO_CONTENT)
+@router.delete("/{asset_id}", status_code=HTTPStatus.NO_CONTENT)
 def delete_asset(
     asset_id: UUID,
     db: Session = Depends(transactional_session),
@@ -155,3 +153,4 @@ def delete_asset(
     repo = SqlAlchemyMediaAssetRepo(db)
     repo.delete(asset_id)
     db.flush()
+

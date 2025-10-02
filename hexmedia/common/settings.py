@@ -171,7 +171,7 @@ class Settings(BaseSettings):
     collage_tile_width: int = Field(400, ge=64, le=4096, description="Width of each tile in collage")
     upscale_policy: str = Field("if_smaller_than", description="never|if_smaller_than|always")
 
-    MAX_THUMB_WORKERS: int = Field(8, ge=1, le=64, description="Upper bound for /thumb workers param")
+    max_thumb_workers: int = Field(8, ge=1, le=64, description="Upper bound for /thumb workers param")
 
     # -------- Public media serving (optional base URL for FE) --------
     public_media_base_url: Optional[str] = Field(

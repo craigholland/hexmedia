@@ -18,8 +18,10 @@ from hexmedia.services.schemas import (
     TagGroupNode
 )
 from hexmedia.services.api.deps import get_db, transactional_session
+from hexmedia.common.settings import get_settings
 
-router = APIRouter()
+cfg = get_settings()
+router = APIRouter(prefix=f"{cfg.api.prefix}/tags", tags=["tags"])
 
 def _to_out(t: Tag) -> TagRead:
     return TagRead.model_validate(t)

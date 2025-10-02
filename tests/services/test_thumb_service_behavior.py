@@ -67,12 +67,12 @@ def test_thumb_service_aggregates_errors_and_details(monkeypatch, db_engine):
     # small custom config to ensure deterministic defaults if used
     cfg = SimpleNamespace(
         media_root=None,
-        THUMB_FORMAT="jpg",
-        COLLAGE_FORMAT="png",
-        THUMB_WIDTH=480,
-        COLLAGE_TILE_WIDTH=160,
-        UPSCALE_POLICY="never",
-        MAX_THUMB_WORKERS=4,
+        thumb_format="jpg",
+        collage_format="png",
+        thumb_width=480,
+        collage_tile_width=160,
+        upscale_policy="never",
+        max_thumb_workers=4,
     )
 
     SessionLocal = sessionmaker(bind=db_engine, future=True)
@@ -103,7 +103,7 @@ def test_thumb_service_aggregates_errors_and_details(monkeypatch, db_engine):
     assert any("boom" in str(e) for e in rep.error_details)
 
 
-# ----- Test 2: respects MAX_THUMB_WORKERS cap --------------------------------
+# ----- Test 2: respects max_thumb_workers cap --------------------------------
 
 class _FakeFuture:
     def __init__(self, result):
@@ -160,12 +160,12 @@ def test_thumb_service_respects_max_workers_cap(monkeypatch, db_engine):
 
     cfg = SimpleNamespace(
         media_root=None,
-        THUMB_FORMAT="jpg",
-        COLLAGE_FORMAT="png",
-        THUMB_WIDTH=320,
-        COLLAGE_TILE_WIDTH=160,
-        UPSCALE_POLICY="never",
-        MAX_THUMB_WORKERS=2,  # cap here
+        thumb_format="jpg",
+        collage_format="png",
+        thumb_width=320,
+        collage_tile_width=160,
+        upscale_policy="never",
+        max_thumb_workers=2,  # cap here
     )
 
     SessionLocal = sessionmaker(bind=db_engine, future=True)
@@ -207,12 +207,12 @@ def test_thumb_service_uses_config_defaults_when_options_missing(monkeypatch, db
     # set defaults in cfg; run() will receive "empty" values and should fall back
     cfg = SimpleNamespace(
         media_root=None,
-        THUMB_FORMAT="defthumb",
-        COLLAGE_FORMAT="defcollage",
-        THUMB_WIDTH=111,
-        COLLAGE_TILE_WIDTH=222,
-        UPSCALE_POLICY="defpolicy",
-        MAX_THUMB_WORKERS=8,
+        thumb_format="defthumb",
+        collage_format="defcollage",
+        thumb_width=111,
+        collage_tile_width=222,
+        upscale_policy="defpolicy",
+        max_thumb_workers=8,
     )
 
     SessionLocal = sessionmaker(bind=db_engine, future=True)
@@ -223,13 +223,13 @@ def test_thumb_service_uses_config_defaults_when_options_missing(monkeypatch, db
         rep = svc.run(
             limit=1,
             regenerate=True,
-            workers=None,          # None -> will default to 1 (then bounded by MAX_THUMB_WORKERS)
+            workers=None,          # None -> will default to 1 (then bounded by max_thumb_workers)
             include_missing=True,  # pass-through to worker
-            thumb_format="",       # falsy -> use cfg.THUMB_FORMAT
-            collage_format=None,   # None -> use thumb_format or cfg.COLLAGE_FORMAT
-            thumb_width=0,         # 0 -> use cfg.THUMB_WIDTH
-            tile_width=0,          # 0 -> use cfg.COLLAGE_TILE_WIDTH
-            upscale_policy="",     # falsy -> cfg.UPSCALE_POLICY
+            thumb_format="",       # falsy -> use cfg.thumb_format
+            collage_format=None,   # None -> use thumb_format or cfg.collage_format
+            thumb_width=0,         # 0 -> use cfg.thumb_width
+            tile_width=0,          # 0 -> use cfg.collage_tile_width
+            upscale_policy="",     # falsy -> cfg.upscale_policy
         )
 
     # worker constructed with cfg defaults
