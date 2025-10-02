@@ -16,3 +16,9 @@ export async function postJSON<T>(url: string, body?: any, params?: Record<strin
   const { data } = await http.post<T>(url, body, { params })
   return data
 }
+
+// Upsert rating for a media item (adjust path/body to match your backend if needed)
+export async function rateItem(mediaItemId: string, score: number) {
+  // If your backend expects a different shape, tweak this line
+  return postJSON<{ ok: boolean }>('/ratings', { media_item_id: mediaItemId, score })
+}

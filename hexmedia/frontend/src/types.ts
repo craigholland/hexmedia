@@ -1,5 +1,17 @@
 // src/types.ts
-
+export interface Asset {
+  id: string
+  kind:
+    | 'video'
+    | 'proxy'
+    | 'thumb'
+    | 'collage'
+    | 'contact'
+    | 'contact_sheet'
+    | 'contactsheet'
+  url: string
+  // ...rest
+}
 // --- Buckets ---
 export type BucketsCount = Record<string, number>
 

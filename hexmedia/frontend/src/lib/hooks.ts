@@ -1,14 +1,6 @@
-import { useQuery, useMutation } from '@tanstack/react-query'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { getJSON, postJSON } from './api'
-import type {
-  BucketsCount,
-  MediaItemCardRead,
-  IngestPlanItem,
-  IngestRunResponse,
-  ThumbPlanItem,
-  ThumbResponse,
-  MediaAssetRead,
-} from '@/types'
+import type { BucketsCount, MediaItemCardRead, IngestPlanItem, IngestRunResponse, ThumbPlanItem, ThumbResponse, MediaAssetRead } from '@/types'
 
 // --- helpers ---
 function pickThumbURL(item: MediaItemCardRead): string | null {
@@ -39,15 +31,10 @@ export function useBucketCounts() {
  * - Always include assets, persons, ratings, *and* tags (for chips)
  * - Normalize each item to ensure `thumb_url` exists (fallback to assets)
  */
-export function useBucketCards(bucket: string, include = 'assets,persons,ratings,tags') {
+export function useBucketCards(bucket: string, include = 'assets,persons,tags,ratings') {
   return useQuery({
     queryKey: ['bucket', bucket, include],
-    queryFn: () => getJSON<MediaItemCardRead[]>(`/media-items/by-bucket/${bucket}`, { include }),
-    select: (items) =>
-      items.map((it) => ({
-        ...it,
-        thumb_url: pickThumbURL(it),
-      })),
+    queryFn: () => getJSON<MediaItemCardRead[]>(`/media-items/by-bucket/${bucket}`, { include })
   })
 }
 
@@ -60,9 +47,15 @@ export function useIngestPlan(limit = 20) {
 }
 
 export function useIngestRun() {
+  const qc = useQueryClient()
   return useMutation({
     mutationFn: (payload: { files: string[]; limit?: number }) =>
-      postJSON<IngestRunResponse>('/ingest/run', payload, payload.limit ? { limit: payload.limit } : undefined),
+      postJSON('/ingest/run', payload, payload.limit ? { limit: payload.limit } : undefined),
+    onSuccess: () => {
+      // Refresh bucket counts/order so the UI reflects new items immediately
+      qc.invalidateQueries({ queryKey: ['buckets','count'] })
+      qc.invalidateQueries({ queryKey: ['buckets','order'] })
+    }
   })
 }
 
@@ -87,5 +80,35 @@ export function useThumbRun() {
       tile_width?: number
       upscale_policy?: 'never' | 'if_smaller_than' | 'always'
     }) => postJSON<ThumbResponse>('/ingest/thumb', payload),
+  })
+}
+
+// --- API health ping (lightweight: just hits a tiny endpoint) ---
+export function useApiHealth() {
+  return useQuery({
+    queryKey: ['health'],
+    // using a small endpoint as a ping; if it 200s, API is "up"
+    queryFn: async () => {
+      await getJSON<string[]>('/media-items/buckets/order')
+      return true
+    },
+    staleTime: 60_000,
+    refetchInterval: 60_000,
+    retry: 1,
+  })
+}
+
+export function useRateItem(bucket?: string, include = 'assets,persons,ratings') {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, score }: { id: string; score: number }) => rateItem(id, score),
+    onSuccess: (_data, vars) => {
+      if (bucket) {
+        qc.setQueryData<MediaItemCardRead[]>(['bucket', bucket, include], (old) => {
+          if (!old) return old
+          return old.map(it => (String(it.id) === String(vars.id) ? { ...it, rating: vars.score } : it))
+        })
+      }
+    },
   })
 }
