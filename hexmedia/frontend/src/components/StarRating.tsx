@@ -11,16 +11,18 @@ type Props = {
 export default function StarRating({ value = 0, max = 5, onChange, disabled, size = 22 }: Props) {
   const [hover, setHover] = useState<number | null>(null)
   const display = hover ?? value ?? 0
+  const stars = Array.from({ length: max }, (_, idx) => idx + 1)
 
   return (
     <div role="radiogroup" aria-label="Rating" className="inline-flex items-center gap-1">
-      {Array.from({ length: max }, (_, i) => i + 1).map(n => {
+      {stars.map(n => {
         const filled = n <= display
         return (
           <button
             key={n}
             role="radio"
-            aria-checked={n === value}
+            aria-checked={n === (value ?? 0)}
+            aria-label={`${n} star${n > 1 ? 's' : ''}`}
             disabled={disabled}
             onMouseEnter={() => setHover(n)}
             onMouseLeave={() => setHover(null)}

@@ -39,17 +39,20 @@ export default function MediaCard({ item, bucket: bucketProp }: Props) {
   const rateM = useRateItem(bucket)
 
   const onRate = (n: number) => {
-    const prev = score
-    setScore(n) // optimistic
-    rateM.mutate(
-      { id: String(item.id), score: n },
-      { onError: () => setScore(prev) }
-    )
+    const prev = score;
+    const clamped = Math.max(0, Math.min(5, n));
+    if (clamped !== (item.rating ?? 0)) {
+        setScore(n) // optimistic
+        rateM.mutate(
+            {id: String(item.id), score: n},
+            {onError: () => setScore(prev)}
+        )
+    }
   }
 
   return (
     <article className="rounded-xl overflow-hidden border border-neutral-800 bg-neutral-900">
-      <Link to={`/item/${item.id}`} state={{ item }}>
+      <Link to={`/bucket/${bucket}/item/${item.id}`} state={{ item }}>
         <div className="aspect-video bg-neutral-800">
           {thumb ? (
             <img src={thumb} className="w-full h-full object-cover" />

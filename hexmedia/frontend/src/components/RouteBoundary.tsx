@@ -1,29 +1,32 @@
-import React from 'react'
+// src/components/RouteBoundary.tsx
+import { ErrorBoundary } from 'react-error-boundary'
+import { useLocation } from 'react-router-dom'
 
-type Props = { children: React.ReactNode }
-type State = { hasError: boolean; error?: unknown }
+function Fallback({ error }: { error: any }) {
+  return (
+    <div className="rounded-lg border border-red-300 bg-red-50 text-red-900 p-3">
+      <div className="font-semibold mb-1">Route error</div>
+      <div className="text-sm">
+        {error?.message ? error.message : 'Unknown error'}
+      </div>
+      {error?.stack && (
+        <pre className="mt-2 p-2 text-xs whitespace-pre-wrap bg-white/60 rounded border border-red-200 overflow-auto">
+          {String(error.stack)}
+        </pre>
+      )}
+      <div className="text-xs text-red-700 mt-2">
+        Check the browser console for more details.
+      </div>
+    </div>
+  )
+}
 
-export default class RouteBoundary extends React.Component<Props, State> {
-  state: State = { hasError: false, error: undefined }
-
-  static getDerivedStateFromError(error: unknown) {
-    return { hasError: true, error }
-  }
-
-  componentDidCatch(error: unknown, info: unknown) {
-    // Keep this console so we can see the error if something breaks
-    console.error('Route error:', error, info)
-  }
-
-  render() {
-    if (this.state.hasError) {
-      return (
-        <div className="p-6">
-          <div className="text-lg font-semibold mb-2">Something went wrong.</div>
-          <div className="text-sm text-neutral-500">Check the console for details.</div>
-        </div>
-      )
-    }
-    return this.props.children
-  }
+export default function RouteBoundary({ children }: { children: React.ReactNode }) {
+  // Keying by pathname ensures the boundary resets on each navigation.
+  const { pathname } = useLocation()
+  return (
+    <ErrorBoundary key={pathname} FallbackComponent={Fallback}>
+      {children}
+    </ErrorBoundary>
+  )
 }
