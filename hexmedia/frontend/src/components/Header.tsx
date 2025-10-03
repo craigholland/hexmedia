@@ -29,6 +29,12 @@ export default function Header() {
             <NavLink to="/tools/thumbs" className={navClass}>
               Thumbs
             </NavLink>
+              <NavLink
+              to="/settings/tags"
+              className={({ isActive }) => `${linkBase} ${isActive ? active : inactive}`}
+            >
+              Settings
+            </NavLink>
           </nav>
         </div>
 

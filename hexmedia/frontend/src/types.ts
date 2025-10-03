@@ -30,11 +30,52 @@ export interface PersonRead {
 }
 
 // --- Tags ---
-export interface TagRead {
+export type Cardinality = 'SINGLE' | 'MULTI'
+
+export type TagGroupRead = {
   id: string
-  name: string
-  slug?: string | null | undefined
+  parent_id?: string | null
+  key: string
+  display_name: string
+  description?: string | null
+  cardinality: Cardinality
+  path?: string
+  depth?: number
+  children?: TagGroupRead[]
 }
+
+export type TagGroupCreate = {
+  parent_id?: string | null
+  key: string
+  display_name: string
+  description?: string | null
+  cardinality?: Cardinality
+}
+
+export type TagGroupUpdate = Partial<TagGroupCreate>
+
+export type TagRead = {
+  id: string
+  group_id?: string | null
+  name: string
+  slug: string
+  description?: string | null
+  parent_id?: string | null
+}
+
+export type TagCreate = {
+  group_id?: string | null
+  name: string
+  slug?: string
+  description?: string | null
+  parent_id?: string | null
+}
+
+export type TagUpdate = Partial<TagCreate>
+
+
+
+
 
 // --- Assets ---
 export interface MediaAssetRead {

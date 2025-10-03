@@ -26,6 +26,11 @@ router = APIRouter(prefix=f"{cfg.api.prefix}/tags", tags=["tags"])
 def _to_out(t: Tag) -> TagRead:
     return TagRead.model_validate(t)
 
+@router.get("/groups", response_model=List[TagGroupNode])
+def list_tag_groups_alias(db: Session = Depends(get_db)):
+    # reuse your existing function:
+    return tag_group_tree(db)
+
 @router.post("", response_model=TagRead, status_code=HTTPStatus.CREATED)
 def create_tag(payload: TagCreate, group_path: Optional[str], db: Session = Depends(transactional_session)) -> TagRead:
     obj = Tag(**payload.model_dump())
@@ -35,11 +40,12 @@ def create_tag(payload: TagCreate, group_path: Optional[str], db: Session = Depe
     return _to_out(obj)
 
 @router.get("/{tag_id}", response_model=TagRead)
-def get_tag(tag_id: str, db: Session = Depends(get_db)) -> TagRead:
+def get_tag(tag_id: UUID, db: Session = Depends(get_db)) -> TagRead:
     obj = db.get(Tag, tag_id)
     if not obj:
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Tag not found")
-    return _to_out(obj)
+    return TagRead.model_validate(obj)
+
 
 @router.get("", response_model=List[TagRead])
 def list_tags(q: str | None = Query(None), limit: int = 100, db: Session = Depends(get_db)) -> List[TagRead]:

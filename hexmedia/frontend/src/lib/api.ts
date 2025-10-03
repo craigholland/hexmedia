@@ -22,3 +22,16 @@ export async function rateItem(mediaItemId: string, score: number) {
   // If your backend expects a different shape, tweak this line
   return postJSON<{ ok: boolean }>('/ratings', { media_item_id: mediaItemId, score })
 }
+
+export async function patchJSON<T>(url: string, body?: any, params?: Record<string, any>) {
+  const { data } = await http.patch<T>(url, body, { params })
+  return data
+}
+export async function putJSON<T>(url: string, body?: any, params?: Record<string, any>) {
+  const { data } = await http.put<T>(url, body, { params })
+  return data
+}
+export async function delJSON<T>(url: string, params?: Record<string, any>) {
+  const { data } = await http.delete<T>(url, { params })
+  return data
+}

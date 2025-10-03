@@ -1,6 +1,8 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { getJSON, postJSON } from './api'
-import type { BucketsCount, MediaItemCardRead, IngestPlanItem, IngestRunResponse, ThumbPlanItem, ThumbResponse, MediaAssetRead } from '@/types'
+import { getJSON, postJSON, patchJSON, delJSON } from './api'
+import type { BucketsCount, MediaItemCardRead, IngestPlanItem, IngestRunResponse, ThumbPlanItem,
+    ThumbResponse, MediaAssetRead, TagGroupRead, TagGroupCreate, TagGroupUpdate,
+    TagRead, TagCreate, TagUpdate } from '@/types'
 
 // --- helpers ---
 function pickThumbURL(item: MediaItemCardRead): string | null {
@@ -110,5 +112,97 @@ export function useRateItem(bucket?: string, include = 'assets,persons,ratings')
         })
       }
     },
+  })
+}
+
+// ---- Tag Groups
+export function useTagGroups() {
+  return useQuery({
+    queryKey: ['tag-groups'],
+    queryFn: () => getJSON<TagGroupRead[]>('/tags/groups')
+  })
+}
+
+export function useUpdateTagGroup() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, body }: { id: string; body: TagGroupUpdate }) =>
+      patchJSON<TagGroupRead>(`/tags/groups/${id}`, body),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['tag-groups'] })
+  })
+}
+
+export function useDeleteTagGroup() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (id: string) => delJSON<void>(`/tags/groups/${id}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['tag-groups'] })
+  })
+}
+
+// Tag groups (tree)
+export function useTagGroupTree() {
+  return useQuery({
+    queryKey: ['tag-groups','tree'],
+    queryFn: () => getJSON<TagGroupNode[]>('/tags/tag-groups/tree')
+  })
+}
+
+export function useCreateTagGroup() {
+  return useMutation({
+    mutationFn: (body: TagGroupCreate) =>
+      postJSON<TagGroupNode>('/tags/tag-groups', body)
+  })
+}
+
+export function useMoveTagGroup() {
+  return useMutation({
+    mutationFn: (payload: { group_id: string } & TagGroupMove) =>
+      postJSON<TagGroupNode>(`/tags/tag-groups/${payload.group_id}/move`, payload)
+  })
+}
+
+// ---- Tags
+export function useTags(groupId?: string | null, search?: string) {
+  return useQuery({
+    queryKey: ['tags', { groupId: groupId ?? null, search: search ?? '' }],
+    queryFn: () =>
+      getJSON<TagRead[]>('/tags', {
+        ...(groupId ? { group_id: groupId } : {}),
+        ...(search ? { q: search } : {})
+      })
+  })
+}
+
+export function useCreateTag() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (body: TagCreate) => postJSON<TagRead>('/tags', body),
+    onSuccess: (_d, vars) => {
+      qc.invalidateQueries({ queryKey: ['tags'] })
+      qc.invalidateQueries({ queryKey: ['tag-groups'] })
+      // Optionally pre-select group refresh
+      if (vars.group_id) qc.invalidateQueries({ queryKey: ['tags', { groupId: vars.group_id }] })
+    }
+  })
+}
+
+export function useUpdateTag() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, body }: { id: string; body: TagUpdate }) =>
+      patchJSON<TagRead>(`/tags/${id}`, body),
+    onSuccess: (_d, vars) => {
+      qc.invalidateQueries({ queryKey: ['tags'] })
+      if (vars.body.group_id) qc.invalidateQueries({ queryKey: ['tags', { groupId: vars.body.group_id }] })
+    }
+  })
+}
+
+export function useDeleteTag() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (id: string) => delJSON<void>(`/tags/${id}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['tags'] })
   })
 }

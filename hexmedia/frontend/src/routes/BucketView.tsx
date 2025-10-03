@@ -1,128 +1,146 @@
-import {useMemo, useState} from 'react'
+import { useMemo, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { useBucketCards } from '@/lib/hooks'
-import type {MediaItemCardRead} from '@/types'
 import MediaCard from '@/components/MediaCard'
-import BucketToolbar from '@/components/BucketToolbar'
+import type { MediaItemCardRead } from '@/types'
 
-export type SortBy = 'title' | 'rating' | 'duration' | 'resolution'
+type SortKey = 'title' | 'rating' | 'duration' | 'date'
+type SortDir = 'asc' | 'desc'
 
 function norm(s?: string | null) {
   return (s ?? '').toLowerCase()
 }
-function hasThumb(item: MediaItemCardRead) {
-  return Boolean(
-    item.thumb_url ||
-    item.assets?.some(a => a.kind === 'thumb' && a.url)
-  )
+
+function matchesQuery(item: MediaItemCardRead, q: string) {
+  if (!q) return true
+  const needle = q.trim().toLowerCase()
+  const fields: string[] = []
+
+  fields.push(item.title ?? '')
+  fields.push(item.identity.identity_name)
+  fields.push(item.identity.media_folder)
+  item.persons?.forEach(p => fields.push(p.display_name ?? p.normalized_name ?? ''))
+  item.tags?.forEach(t => fields.push(t.name ?? t.slug ?? ''))
+
+  const hay = fields.join(' ').toLowerCase()
+  return hay.includes(needle)
 }
+
+function compare(a: MediaItemCardRead, b: MediaItemCardRead, key: SortKey, dir: SortDir) {
+  const mul = dir === 'asc' ? 1 : -1
+  switch (key) {
+    case 'title': {
+      const ta = norm(a.title ?? a.identity.identity_name)
+      const tb = norm(b.title ?? b.identity.identity_name)
+      return ta < tb ? -1 * mul : ta > tb ? 1 * mul : 0
+    }
+    case 'rating': {
+      const ra = typeof a.rating === 'number' ? a.rating : -1
+      const rb = typeof b.rating === 'number' ? b.rating : -1
+      return (ra - rb) * mul
+    }
+    case 'duration': {
+      const da = a.duration_sec ?? -1
+      const db = b.duration_sec ?? -1
+      return (da - db) * mul
+    }
+    case 'date': {
+      // If you later add created_at/last_updated, swap it in here.
+      // For now, keep a stable order using id as a proxy.
+      const ia = String(a.id)
+      const ib = String(b.id)
+      return ia < ib ? -1 * mul : ia > ib ? 1 * mul : 0
+    }
+  }
+}
+
 export default function BucketView() {
   const { bucket = '' } = useParams()
-  const include = 'assets,persons,ratings'
-  const { data, isLoading, error } = useBucketCards(bucket, include)
+  const { data, isLoading, error } = useBucketCards(bucket, 'assets,persons,ratings')
 
-  // toolbar state
-  const [query, setQuery] = useState('')
-  const [sortBy, setSortBy] = useState<SortBy>('rating')
+  const [q, setQ] = useState('')
+  const [sortKey, setSortKey] = useState<SortKey>('title')
+  const [sortDir, setSortDir] = useState<SortDir>('asc')
   const [minRating, setMinRating] = useState(0)
-  const [onlyThumbs, setOnlyThumbs] = useState(false)
-
-  const items = data ?? []
 
   const filtered = useMemo(() => {
-    let list = items
-
-    // filter: query
-    const q = norm(query)
-    if (q) {
-      list = list.filter(it => {
-        const title = norm(it.title) || norm(it.identity.identity_name)
-        const idName = norm(it.identity.identity_name)
-        const tagBlob = norm(it.tags?.map(t => `${t.name} ${t.slug ?? ''}`).join(' '))
-        const peopleBlob = norm(it.persons?.map(p => `${p.display_name ?? ''} ${p.normalized_name ?? ''}`).join(' '))
-        return (
-          title.includes(q) ||
-          idName.includes(q) ||
-          tagBlob.includes(q) ||
-          peopleBlob.includes(q)
-        )
-      })
-    }
-
-    // filter: min rating
-    if (minRating > 0) {
-      list = list.filter(it => (it.rating ?? 0) >= minRating)
-    }
-
-    // filter: has thumb
-    if (onlyThumbs) {
-      list = list.filter(it => hasThumb(it))
-    }
-
-    // sort
-    const collator = new Intl.Collator(undefined, { sensitivity: 'base', numeric: true })
-    const scoreRes = (w?: number | null, h?: number | null) => (w ?? 0) * (h ?? 0)
-
-    const sorted = [...list].sort((a, b) => {
-      switch (sortBy) {
-        case 'title': {
-          const aa = a.title ?? a.identity.identity_name ?? ''
-          const bb = b.title ?? b.identity.identity_name ?? ''
-          return collator.compare(aa, bb) // asc
-        }
-        case 'duration': {
-          const aa = a.duration_sec ?? 0
-          const bb = b.duration_sec ?? 0
-          return bb - aa // desc
-        }
-        case 'resolution': {
-          const aa = scoreRes(a.width, a.height)
-          const bb = scoreRes(b.width, b.height)
-          return bb - aa // desc
-        }
-        case 'rating':
-        default: {
-          const aa = a.rating ?? 0
-          const bb = b.rating ?? 0
-          if (bb !== aa) return bb - aa // rating desc
-          // tie-break by title asc
-          const ta = a.title ?? a.identity.identity_name ?? ''
-          const tb = b.title ?? b.identity.identity_name ?? ''
-          return collator.compare(ta, tb)
-        }
-      }
-    })
-
-    return sorted
-  }, [items, query, sortBy, minRating, onlyThumbs])
-
-  const onClear = () => {
-    setQuery('')
-    setSortBy('rating')
-    setMinRating(0)
-    setOnlyThumbs(false)
-  }
+    const arr = (data ?? []).filter(i => matchesQuery(i, q))
+                             .filter(i => (i.rating ?? 0) >= minRating)
+    return arr.sort((a, b) => compare(a, b, sortKey, sortDir))
+  }, [data, q, sortKey, sortDir, minRating])
 
   if (isLoading) return <div className="text-neutral-400">Loading…</div>
-  if (error)     return <div className="text-red-600">Failed to load bucket.</div>
-  if (!items.length) return <div>No items in bucket {bucket}.</div>
+  if (error) return <div className="text-red-600">Failed to load items.</div>
 
   return (
-    <div>
-      <BucketToolbar
-        query={query} setQuery={setQuery}
-        sortBy={sortBy} setSortBy={setSortBy}
-        minRating={minRating} setMinRating={setMinRating}
-        onlyThumbs={onlyThumbs} setOnlyThumbs={setOnlyThumbs}
-        total={items.length} visible={filtered.length}
-        onClear={onClear}
-      />
+    <div className="space-y-4">
+      {/* Toolbar */}
+      <div className="flex flex-wrap items-end gap-3">
+        <div className="flex-1 min-w-[12rem]">
+          <label className="block text-sm text-neutral-600 mb-1">Search</label>
+          <input
+            value={q}
+            onChange={e => setQ(e.target.value)}
+            placeholder="Title, person, tag…"
+            className="w-full rounded-md border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-3 py-1.5"
+          />
+        </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        {filtered.map(card => (
-          <MediaCard key={card.id} item={card} />
-        ))}
+        <div>
+          <label className="block text-sm text-neutral-600 mb-1">Sort</label>
+          <div className="flex items-center gap-2">
+            <select
+              value={sortKey}
+              onChange={e => setSortKey(e.target.value as SortKey)}
+              className="rounded-md border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-3 py-1.5"
+            >
+              <option value="title">Title</option>
+              <option value="rating">Rating</option>
+              <option value="duration">Duration</option>
+              <option value="date">ID (stable)</option>
+            </select>
+            <button
+              onClick={() => setSortDir(d => (d === 'asc' ? 'desc' : 'asc'))}
+              className="px-3 py-1.5 rounded-md border border-neutral-300 dark:border-neutral-700"
+              title={`Toggle sort (${sortDir})`}
+            >
+              {sortDir === 'asc' ? '↑' : '↓'}
+            </button>
+          </div>
+        </div>
+
+        <div className="w-48">
+          <label className="block text-sm text-neutral-600 mb-1">Min rating</label>
+          <input
+            type="range"
+            min={0}
+            max={5}
+            step={1}
+            value={minRating}
+            onChange={e => setMinRating(parseInt(e.target.value, 10))}
+            className="w-full"
+          />
+          <div className="text-xs text-neutral-500 mt-1">{minRating}★ and up</div>
+        </div>
       </div>
+
+      {/* Stats line */}
+      <div className="text-sm text-neutral-600 dark:text-neutral-400">
+        Showing <span className="font-semibold">{filtered.length}</span> of {data?.length ?? 0} item(s) in bucket <span className="font-mono">{bucket}</span>
+        {q ? <> • filtered by “{q}”</> : null}
+        {minRating > 0 ? <> • min {minRating}★</> : null}
+      </div>
+
+      {/* Grid */}
+      {filtered.length ? (
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          {filtered.map(item => (
+            <MediaCard key={item.id} item={item} bucket={bucket} />
+          ))}
+        </div>
+      ) : (
+        <div className="text-neutral-500">No items match your filters.</div>
+      )}
     </div>
   )
 }
