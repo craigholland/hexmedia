@@ -1,5 +1,6 @@
 # Ignore all distribution folders
 dist/
+node_modules/
 
 # Ignore Poetry lock files
 poetry.lock
