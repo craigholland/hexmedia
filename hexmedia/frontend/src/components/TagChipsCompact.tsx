@@ -19,26 +19,31 @@ export default function TagChipsCompact({ tags, maxVisible = 6, onClickTag }: Pr
       {visible.map(t => (
         <button
           key={t.id}
+          type="button"
           onClick={onClickTag ? () => onClickTag(t) : undefined}
           className="inline-flex items-center px-2 py-0.5 rounded-full border text-[11px] leading-5
-                     border-neutral-700 text-neutral-200 hover:bg-neutral-800"
-          title={t.slug}
+                     border-neutral-700 text-neutral-200 hover:bg-neutral-800 focus:outline-none focus:ring-1 focus:ring-neutral-500"
+          title={t.slug || t.name}
         >
           {t.name}
         </button>
       ))}
       {!expanded && hidden > 0 && (
         <button
+          type="button"
+          aria-label={`Show ${hidden} more tags`}
           onClick={() => setExpanded(true)}
-          className="text-[11px] px-2 py-0.5 rounded-full border border-dashed border-neutral-700 text-neutral-300 hover:bg-neutral-800"
+          className="text-[11px] px-2 py-0.5 rounded-full border border-dashed border-neutral-700 text-neutral-300 hover:bg-neutral-800 focus:outline-none focus:ring-1 focus:ring-neutral-500"
         >
           + {hidden} more…
         </button>
       )}
       {expanded && list.length > maxVisible && (
         <button
+          type="button"
+          aria-label="Collapse extra tags"
           onClick={() => setExpanded(false)}
-          className="text-[11px] px-2 py-0.5 rounded-full border border-dashed border-neutral-700 text-neutral-400 hover:bg-neutral-800"
+          className="text-[11px] px-2 py-0.5 rounded-full border border-dashed border-neutral-700 text-neutral-400 hover:bg-neutral-800 focus:outline-none focus:ring-1 focus:ring-neutral-500"
         >
           collapse
         </button>

@@ -3,6 +3,7 @@ import {
   useTagGroups, useCreateTagGroup, useUpdateTagGroup, useDeleteTagGroup,
   useTags, useCreateTag, useUpdateTag, useDeleteTag
 } from '@/lib/hooks'
+import { useToasts } from '@/providers/ToastProvider'
 import type { TagGroupRead, TagRead } from '@/types'
 
 function slugify(s: string) {
@@ -31,6 +32,8 @@ function buildTree(groups?: TagGroupRead[]): TreeNode[] {
 export default function SettingsTags() {
   const groupsQ = useTagGroups()
   const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null)
+
+  const { success, error } = useToasts()
 
   const tree = useMemo(() => buildTree(groupsQ.data), [groupsQ.data])
   const selectedGroup = useMemo(
@@ -109,17 +112,34 @@ export default function SettingsTags() {
     if (!body.key || !body.display_name) return alert('Key and Display Name are required.')
 
     if (gForm.id) {
-      updateGroupM.mutate({ id: gForm.id, body })
+      updateGroupM.mutate(
+        { id: gForm.id, body },
+        {
+          onSuccess: () => success('Group updated'),
+          onError: () => error('Failed to update group'),
+        }
+      )
     } else {
-      createGroupM.mutate(body)
+      createGroupM.mutate(body, {
+        onSuccess: (g) => success(`Created group “${g.display_name}”`),
+        onError: () => error('Failed to create group'),
+      })
     }
     setGForm({ parent_id: selectedGroupId, key: '', display_name: '', cardinality: 'MULTI', description: '' })
   }
 
   const removeGroup = (g: TagGroupRead) => {
     if (!confirm(`Delete group "${g.display_name}"?\n(Will fail if it has children or tags.)`)) return
-    deleteGroupM.mutate({ id: g.id })
-    if (selectedGroupId === g.id) setSelectedGroupId(null)
+    deleteGroupM.mutate(
+      { id: g.id },
+      {
+        onSuccess: () => {
+          success(`Deleted group “${g.display_name}”`)
+          if (selectedGroupId === g.id) setSelectedGroupId(null)
+        },
+        onError: () => error('Failed to delete group'),
+      }
+    )
   }
 
   const startNewTag = () => {
@@ -139,34 +159,52 @@ export default function SettingsTags() {
   }
 
   const submitTag = () => {
-  const name = tForm.name.trim()
-  const slug = (tForm.slug || slugify(name)).trim()
-  if (!name || !slug) return alert('Name and Slug are required.')
+    const name = tForm.name.trim()
+    const slug = (tForm.slug || slugify(name)).trim()
+    if (!name || !slug) return alert('Name and Slug are required.')
 
-  const baseBody: any = {
-    name,
-    slug,
-    description: tForm.description?.trim() || null,
-    parent_id: tForm.parent_id ?? null,
+    const baseBody: any = {
+      name,
+      slug,
+      description: tForm.description?.trim() || null,
+      parent_id: tForm.parent_id ?? null,
+    }
+
+    // If a group is selected, include group_path **in the body only**
+    if (selectedGroup?.path) {
+      baseBody.group_path = selectedGroup.path
+    }
+
+    if (tForm.id) {
+      updateTagM.mutate(
+        { id: tForm.id, body: baseBody },
+        {
+          onSuccess: () => success('Tag updated'),
+          onError: () => error('Failed to update tag'),
+        }
+      )
+    } else {
+      createTagM.mutate(
+        { body: baseBody },
+        {
+          onSuccess: (t) => success(`Created tag “${t.name}”`),
+          onError: () => error('Failed to create tag'),
+        }
+      )
+    }
+
+    startNewTag()
   }
-
-  // If a group is selected, include group_path **in the body only**
-  if (selectedGroup?.path) {
-    baseBody.group_path = selectedGroup.path
-  }
-
-  if (tForm.id) {
-    updateTagM.mutate({ id: tForm.id, body: baseBody })
-  } else {
-    createTagM.mutate({ body: baseBody })
-  }
-
-  startNewTag()
-}
 
   const removeTag = (t: TagRead) => {
     if (!confirm(`Delete tag "${t.name}"?`)) return
-    deleteTagM.mutate({ id: t.id })
+    deleteTagM.mutate(
+      { id: t.id },
+      {
+        onSuccess: () => success(`Deleted tag “${t.name}”`),
+        onError: () => error('Failed to delete tag'),
+      }
+    )
   }
 
   const renderTree = (nodes: TreeNode[], level = 0) => (

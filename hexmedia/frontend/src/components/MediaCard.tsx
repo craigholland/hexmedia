@@ -4,7 +4,7 @@ import StarRating from '@/components/StarRating'
 import { useRateItem } from '@/lib/hooks'
 import type { MediaItemCardRead } from '@/types'
 import TagChipsCompact from "@/components/TagChipsCompact";
-
+import { useToasts } from "@/providers/ToastProvider";
 
 type Props = {
   item: MediaItemCardRead
@@ -21,9 +21,9 @@ function fmtDuration(sec?: number | null) {
 }
 
 export default function MediaCard({ item, bucket: bucketProp }: Props) {
-  // If parent didn’t pass bucket, try to infer from the URL (/bucket/:bucket)
   const params = useParams()
   const bucket = bucketProp ?? params.bucket ?? item.identity.media_folder
+  const { success, error } = useToasts()
 
   const thumb = useMemo(
     () => item.thumb_url || item.assets?.find(a => a.kind === 'thumb')?.url || null,
@@ -41,20 +41,25 @@ export default function MediaCard({ item, bucket: bucketProp }: Props) {
   const rateM = useRateItem(bucket)
 
   const onRate = (n: number) => {
-    const prev = score;
-    const clamped = Math.max(0, Math.min(5, n));
+    const prev = score
+    const clamped = Math.max(0, Math.min(5, n))
     if (clamped !== (item.rating ?? 0)) {
-        setScore(n) // optimistic
-        rateM.mutate(
-            {id: String(item.id), score: n},
-            {onError: () => setScore(prev)}
-        )
+      setScore(clamped) // optimistic
+      rateM.mutate(
+        { id: String(item.id), score: clamped },
+        {
+          onSuccess: () => success('Rating updated'),
+          onError: () => {
+            setScore(prev)
+            error('Failed to update rating')
+          },
+        }
+      )
     }
   }
 
   return (
     <article className="rounded-xl overflow-hidden border border-neutral-800 bg-neutral-900">
-
       <Link to={`/bucket/${bucket}/item/${item.id}`} state={{ item }}>
         <div className="aspect-video bg-neutral-800">
           {thumb ? (
@@ -68,28 +73,21 @@ export default function MediaCard({ item, bucket: bucketProp }: Props) {
       </Link>
 
       <div className="p-3 space-y-2">
-        {/* Top row: title left, stars right (upper-right of the technical/details area) */}
         <div className="flex items-start justify-between gap-3">
           <div className="text-sm line-clamp-1">{title}</div>
-          <StarRating
-            value={score}
-            onChange={onRate}
-            disabled={rateM.isPending}
-            size={18}
-          />
+          <StarRating value={score} onChange={onRate} disabled={rateM.isPending} size={18} />
         </div>
+
         <TagChipsCompact tags={item.tags} maxVisible={6} />
-        {/* Path */}
+
         <div className="text-xs text-neutral-500 font-mono">
           {item.identity.media_folder}/{item.identity.identity_name}.{item.identity.video_ext}
         </div>
 
-        {/* Tiny technical line */}
         <div className="text-xs text-neutral-400">
           {duration ? `${duration}` : ''}
           {item.width && item.height ? ` • ${item.width}×${item.height}` : ''}
         </div>
-
       </div>
     </article>
   )

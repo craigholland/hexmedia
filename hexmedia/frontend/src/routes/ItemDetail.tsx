@@ -1,10 +1,12 @@
-import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
+import { Link, useLocation, useParams } from 'react-router-dom'
 import { useEffect, useMemo, useState } from 'react'
 import { useBucketCards, useRateItem } from '@/lib/hooks'
 import type { MediaItemCardRead } from '@/types'
 import AssetsPanel from '@/components/AssetsPanel'
 import StarRating from '@/components/StarRating'
 import TaggingPanel from '@/components/TaggingPanel'
+import { useToasts } from '@/providers/ToastProvider'
+
 
 function fmtDuration(sec?: number | null) {
   if (!sec || sec <= 0) return null
@@ -17,7 +19,6 @@ function fmtDuration(sec?: number | null) {
 }
 
 export default function ItemDetail() {
-  const nav = useNavigate()
   const { bucket = '', id = '' } = useParams()
   const location = useLocation()
   const state = location.state as { item?: MediaItemCardRead } | undefined
@@ -33,7 +34,8 @@ export default function ItemDetail() {
   )
   const item = itemFromData ?? state?.item
 
-  const rateM = useRateItem(bucket)
+  const rateM = useRateItem(bucket, include)
+    const { success, error } = useToasts()
   const [score, setScore] = useState<number>(item?.rating ?? 0)
 
   // keep local score synced when item refetches
@@ -44,10 +46,15 @@ export default function ItemDetail() {
   const handleRate = (n: number) => {
     if (!item) return
     const prev = score
-    setScore(n) // optimistic
+    const clamped = Math.max(0, Math.min(5, n))  // ⬅️ clamp like MediaCard
+    if (clamped === (item.rating ?? 0)) return
+    setScore(clamped)                            // optimistic
     rateM.mutate(
-      { id: String(item.id), score: n },
-      { onError: () => setScore(prev) }
+      { id: String(item.id), score: clamped },
+      {
+        onSuccess: () => success('Rating saved'),
+        onError: () => { setScore(prev); error('Failed to save rating') },
+      }
     )
   }
 

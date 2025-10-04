@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useThumbPlan, useThumbRun } from '@/lib/hooks'
+import { useToasts } from '@/providers/ToastProvider'
 
 export default function ThumbsPage() {
   const [limit, setLimit] = useState(20)
@@ -9,15 +10,27 @@ export default function ThumbsPage() {
 
   const planQ = useThumbPlan(limit, missing)
   const runM = useThumbRun()
+  const { success, error } = useToasts()
 
   const onRun = () => {
-    runM.mutate({
-      limit,
-      regenerate: regen,
-      include_missing: includeMissing,
-      upscale_policy: 'if_smaller_than'
-    })
+    runM.mutate(
+      {
+        limit,
+        regenerate: regen,
+        include_missing: includeMissing,
+        upscale_policy: 'if_smaller_than'
+      },
+      {
+        onSuccess: (d: any) => success(`Thumbs complete: Generated ${d?.generated_count ?? 0} • Skipped ${d?.skipped_count ?? 0}`),
+        onError: () => error('Thumbnail job failed'),
+      }
+    )
   }
+
+  const onRefreshPlan = () =>
+    planQ.refetch({ throwOnError: true })
+      .then(() => success('Plan refreshed'))
+      .catch(() => error('Failed to refresh plan'))
 
   return (
     <div className="space-y-6">
@@ -56,7 +69,7 @@ export default function ThumbsPage() {
       <div className="flex gap-3">
         <button
           className="px-3 py-2 rounded-md bg-neutral-900 text-white dark:bg-white dark:text-neutral-900 disabled:opacity-50"
-          onClick={() => planQ.refetch()}
+          onClick={onRefreshPlan}
           disabled={planQ.isFetching}
         >
           {planQ.isFetching ? 'Planning…' : 'Refresh Plan'}

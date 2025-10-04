@@ -1,10 +1,12 @@
 import { useIngestPlan, useIngestRun } from '@/lib/hooks'
 import { useMemo, useState } from 'react'
+import { useToasts } from '@/providers/ToastProvider'
 
 export default function IngestPage() {
   const [limit, setLimit] = useState(10)
   const planQ = useIngestPlan(limit)
   const runM  = useIngestRun()
+  const { success, error } = useToasts()
 
   const files = useMemo(() => {
     const rows = planQ.data ?? []
@@ -14,8 +16,21 @@ export default function IngestPage() {
       .filter((p: unknown): p is string => typeof p === 'string' && p.length > 0)
   }, [planQ.data])
 
-  const onPlanRefresh = () => planQ.refetch()
-  const onRun = () => { if (files.length) runM.mutate({ files, limit }) }
+  const onPlanRefresh = () =>
+    planQ.refetch({ throwOnError: true })
+      .then(() => success('Plan refreshed'))
+      .catch(() => error('Failed to refresh plan'))
+
+  const onRun = () => {
+    if (!files.length) return
+    runM.mutate(
+      { files, limit },
+      {
+        onSuccess: (d: any) => success(`Ingest complete: Created ${d?.created_count ?? 0} • Skipped ${d?.skipped_count ?? 0}`),
+        onError: () => error('Ingest failed'),
+      }
+    )
+  }
 
   return (
     <div className="space-y-6">
@@ -93,7 +108,6 @@ export default function IngestPage() {
             Created: {runM.data.created_count ?? 0} • Skipped: {runM.data.skipped_count ?? 0}
           </div>
 
-          {/* If backend returns arrays, show a compact list */}
           {!!(runM.data.imported?.length) && (
             <div className="text-sm">
               <div className="font-medium mb-1">Imported</div>

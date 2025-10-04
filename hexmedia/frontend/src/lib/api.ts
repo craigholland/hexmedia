@@ -18,9 +18,9 @@ export async function postJSON<T>(url: string, body?: any, params?: Record<strin
 }
 
 // Upsert rating for a media item (adjust path/body to match your backend if needed)
-export async function rateItem(mediaItemId: string, score: number) {
-  // If your backend expects a different shape, tweak this line
-  return postJSON<{ ok: boolean }>('/ratings', { media_item_id: mediaItemId, score })
+export function rateItem(id: string, score: number) {
+  // If your backend uses a different route, tweak here (e.g. /media-items/:id/ratings)
+  return putJSON(`/ratings/media-items/${id}`, { score })
 }
 
 export async function patchJSON<T>(url: string, body?: any, params?: Record<string, any>) {

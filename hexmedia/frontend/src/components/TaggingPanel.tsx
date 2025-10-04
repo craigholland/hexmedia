@@ -1,5 +1,7 @@
 import { useMemo, useState } from 'react'
-import { useTagGroups, useTags, useAttachTag, useDetachTag, useCreateTag } from '@/lib/hooks'
+import { useTagGroups, useTags, useAttachTag, useDetachTag, useCreateTag, useGroupTags } from '@/lib/hooks'
+import MultiSelectPopover from '@/components/Tagging/MultiSelectPopover'
+import { useToasts } from '@/providers/ToastProvider'
 import type { MediaItemCardRead, TagRead, TagGroupRead } from '@/types'
 
 type Treeish = TagGroupRead & { children?: TagGroupRead[] }
@@ -90,6 +92,7 @@ export default function TaggingPanel({ item, bucket }: { item: MediaItemCardRead
     return m
   }, [groupsFlat])
 
+  const { success, error } = useToasts()
   const detachM = useDetachTag(bucket)
   const attachM = useAttachTag(bucket)
   const createTagM = useCreateTag()
@@ -116,12 +119,106 @@ export default function TaggingPanel({ item, bucket }: { item: MediaItemCardRead
     return map
   }, [item.tags, groupsByPath])
 
-  /** GROUPED SECTION (dropdown only) */
+  /** GROUPED SECTION */
   function GroupSection({ group }: { group: TagGroupRead }) {
     const groupId = String(group.id)
-    const groupTagsQ = useTags(groupId)
+    const isMulti = String(group.cardinality ?? '').toUpperCase() === 'MULTI'
     const selected = tagsByGroup.get(groupId) ?? []
 
+    if (isMulti) {
+      // MULTI: debounced search + checklist popover
+      const { items, isLoading, q, setQ } = useGroupTags(groupId, { limit: 50 })
+      const selectedIds = useMemo(() => selected.map((t) => String(t.id)), [selected])
+
+      // Index to resolve TagRead from id for attach (merge fetched + selected)
+      const byId = useMemo(() => {
+        const m = new Map<string, TagRead>()
+        for (const t of items ?? []) m.set(String(t.id), t)
+        for (const t of selected) m.set(String(t.id), t)
+        return m
+      }, [items, selected])
+
+      const onChangeSelectedIds = (nextIds: string[]) => {
+        const prev = new Set(selectedIds)
+        const next = new Set(nextIds)
+
+        const toDetach = [...prev].filter((id) => !next.has(id))
+        const toAttach = [...next].filter((id) => !prev.has(id))
+
+        // fire off updates (optimistic handled by hooks)
+        for (const id of toDetach) {
+          detachM.mutate(
+            { mediaId: String(item.id), tagId: String(id) },
+            { onError: () => error('Failed to detach tag') }
+          )
+        }
+        for (const id of toAttach) {
+          const tag = byId.get(String(id))
+          if (tag) {
+            attachM.mutate(
+              { mediaId: String(item.id), tag },
+              { onError: () => error('Failed to attach tag') }
+            )
+          }
+        }
+
+        // summarize the change for UX
+        if (toAttach.length || toDetach.length) {
+          success(`Updating tags: +${toAttach.length} / −${toDetach.length}`)
+        }
+      }
+
+      return (
+        <section className="space-y-2">
+          <div className="flex items-center justify-between gap-3">
+            <div className="text-sm font-semibold">{group.display_name}</div>
+            <MultiSelectPopover
+              items={items ?? []}
+              selectedIds={selectedIds}
+              onChange={onChangeSelectedIds}
+              loading={isLoading}
+              searchValue={q}
+              onSearchChange={setQ}
+              trigger={({ open }) => (
+                <button
+                  type="button"
+                  onClick={open}
+                  className="rounded-md border px-2 py-1 text-sm bg-white/5 border-neutral-700"
+                  title="Add / Edit tags"
+                >
+                  + Add / Edit
+                </button>
+              )}
+            />
+          </div>
+
+          <div className="flex flex-wrap gap-2">
+            {selected.length ? (
+              selected.map((t) => (
+                <Chip
+                  key={t.id}
+                  tag={t}
+                  onRemove={() =>
+                    detachM.mutate(
+                      { mediaId: String(item.id), tagId: String(t.id) },
+                      {
+                        onSuccess: () => success(`Removed “${t.name}”`),
+                        onError: () => error('Failed to detach tag'),
+                      }
+                    )
+                  }
+                />
+              ))
+            ) : (
+              <div className="text-xs text-neutral-500">No tags selected.</div>
+            )}
+          </div>
+        </section>
+      )
+    }
+
+    // SINGLE: dropdown UX
+    const groupTagsQ = useTags(groupId)
     const options = (groupTagsQ.data ?? []).filter(
       (t) => !selected.some((s) => String(s.id) === String(t.id))
     )
@@ -138,7 +235,15 @@ export default function TaggingPanel({ item, bucket }: { item: MediaItemCardRead
                 const tagId = e.target.value
                 if (tagId) {
                   const tag = options.find((t) => String(t.id) === tagId)
-                  if (tag) attachM.mutate({ mediaId: String(item.id), tag })
+                  if (tag) {
+                    attachM.mutate(
+                      { mediaId: String(item.id), tag },
+                      {
+                        onSuccess: () => success(`Added “${tag.name}”`),
+                        onError: () => error('Failed to attach tag'),
+                      }
+                    )
+                  }
                 }
                 e.currentTarget.value = ''
               }}
@@ -159,7 +264,15 @@ export default function TaggingPanel({ item, bucket }: { item: MediaItemCardRead
               <Chip
                 key={t.id}
                 tag={t}
-                onRemove={() => detachM.mutate({ mediaId: String(item.id), tagId: String(t.id) })}
+                onRemove={() =>
+                  detachM.mutate(
+                    { mediaId: String(item.id), tagId: String(t.id) },
+                    {
+                      onSuccess: () => success(`Removed “${t.name}”`),
+                      onError: () => error('Failed to detach tag'),
+                    }
+                  )
+                }
               />
             ))
           ) : (
@@ -188,12 +301,22 @@ export default function TaggingPanel({ item, bucket }: { item: MediaItemCardRead
       const name = q.trim()
       if (!name) return
       const body = { name, slug: slugify(name), description: null as string | null }
-      createTagM.mutate({ body }, {
-        onSuccess: (newTag) => {
-          attachM.mutate({ mediaId: String(item.id), tag: newTag })
-          setQ('')
+      createTagM.mutate(
+        { body },
+        {
+          onSuccess: (newTag) => {
+            attachM.mutate(
+              { mediaId: String(item.id), tag: newTag },
+              {
+                onSuccess: () => success(`Created “${newTag.name}” and attached`),
+                onError: () => error('Created tag, but failed to attach'),
+              }
+            )
+            setQ('')
+          },
+          onError: () => error('Failed to create tag'),
         }
-      })
+      )
     }
 
     return (
@@ -206,7 +329,15 @@ export default function TaggingPanel({ item, bucket }: { item: MediaItemCardRead
               <Chip
                 key={t.id}
                 tag={t}
-                onRemove={() => detachM.mutate({ mediaId: String(item.id), tagId: String(t.id) })}
+                onRemove={() =>
+                  detachM.mutate(
+                    { mediaId: String(item.id), tagId: String(t.id) },
+                    {
+                      onSuccess: () => success(`Removed “${t.name}”`),
+                      onError: () => error('Failed to detach tag'),
+                    }
+                  )
+                }
               />
             ))
           ) : (
@@ -222,56 +353,62 @@ export default function TaggingPanel({ item, bucket }: { item: MediaItemCardRead
             onChange={(e) => setQ(e.target.value)}
           />
 
-        {showPanel && (
-          <div
-            className="absolute z-10 mt-1 w-full rounded-md shadow-lg max-h-64 overflow-auto border"
-            style={{
-              backgroundColor: '#001f3f', // navy
-              color: 'white',
-              borderColor: '#001a35',
-            }}
-          >
-            {(freeformQ.data ?? []).length > 0 ? (
-              <ul className="py-1">
-                {(freeformQ.data ?? []).map((t) => (
-                  <li key={t.id}>
-                    <button
-                      className="w-full text-left px-3 py-2 text-sm"
-                      style={{ backgroundColor: 'transparent' }}
-                      onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = '#004080')}
-                      onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
-                      onClick={() => {
-                        attachM.mutate({ mediaId: String(item.id), tag: t })
-                        setQ('')
-                      }}
-                      title={t.slug}
-                    >
-                      {formatTagPath(t, groupsById, groupsByPath, tagsIndex)}
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <div className="px-3 py-2 text-sm" style={{ color: '#cbd5e1' }}>
-                No matches
-              </div>
-            )}
-
-            <div style={{ borderTop: '1px solid #0b2447' }} />
-
-            <button
-              className="w-full text-left px-3 py-2 text-sm font-medium"
-              style={{ backgroundColor: 'transparent' }}
-              onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = '#004080')}
-              onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
-              onClick={onCreateAndAttach}
-              disabled={!q.trim() || createTagM.isPending}
-              title="Create a new freeform tag and attach it"
+          {showPanel && (
+            <div
+              className="absolute z-10 mt-1 w-full rounded-md shadow-lg max-h-64 overflow-auto border"
+              style={{
+                backgroundColor: '#001f3f', // navy
+                color: 'white',
+                borderColor: '#001a35',
+              }}
             >
-              + Add new tag “{q.trim()}”
-            </button>
-          </div>
-        )}
+              {(freeformQ.data ?? []).length > 0 ? (
+                <ul className="py-1">
+                  {(freeformQ.data ?? []).map((t) => (
+                    <li key={t.id}>
+                      <button
+                        className="w-full text-left px-3 py-2 text-sm"
+                        style={{ backgroundColor: 'transparent' }}
+                        onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = '#004080')}
+                        onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
+                        onClick={() => {
+                          attachM.mutate(
+                            { mediaId: String(item.id), tag: t },
+                            {
+                              onSuccess: () => success(`Added “${t.name}”`),
+                              onError: () => error('Failed to attach tag'),
+                            }
+                          )
+                          setQ('')
+                        }}
+                        title={t.slug}
+                      >
+                        {formatTagPath(t, groupsById, groupsByPath, tagsIndex)}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <div className="px-3 py-2 text-sm" style={{ color: '#cbd5e1' }}>
+                  No matches
+                </div>
+              )}
+
+              <div style={{ borderTop: '1px solid #0b2447' }} />
+
+              <button
+                className="w-full text-left px-3 py-2 text-sm font-medium"
+                style={{ backgroundColor: 'transparent' }}
+                onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = '#004080')}
+                onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
+                onClick={onCreateAndAttach}
+                disabled={!q.trim() || createTagM.isPending}
+                title="Create a new freeform tag and attach it"
+              >
+                + Add new tag “{q.trim()}”
+              </button>
+            </div>
+          )}
         </div>
       </section>
     )

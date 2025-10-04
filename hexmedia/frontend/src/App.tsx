@@ -10,6 +10,8 @@ import ThumbsPage from '@/routes/ThumbsPage'
 import ItemDetail from '@/routes/ItemDetail'
 import SettingsLayout from '@/routes/settings/SettingsLayout'
 import SettingsTags from '@/routes/SettingsTags'
+import { ToastProvider } from "@/providers/ToastProvider";
+
 const qc = new QueryClient()
 
 export default function App() {
@@ -19,6 +21,7 @@ export default function App() {
         <div className="min-h-screen bg-neutral-50 text-neutral-900 dark:bg-neutral-950 dark:text-neutral-100">
           <Header />
           <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+              <ToastProvider>
               <RouteBoundary>
             <Routes>
               <Route path="/" element={<Navigate to="/buckets" replace />} />
@@ -33,6 +36,7 @@ export default function App() {
               <Route path="*" element={<div>Not Found</div>} />
             </Routes>
               </RouteBoundary>
+                  </ToastProvider>
           </main>
         </div>
       </BrowserRouter>
