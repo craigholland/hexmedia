@@ -3,6 +3,8 @@ import { Link, useParams } from 'react-router-dom'
 import StarRating from '@/components/StarRating'
 import { useRateItem } from '@/lib/hooks'
 import type { MediaItemCardRead } from '@/types'
+import TagChipsCompact from "@/components/TagChipsCompact";
+
 
 type Props = {
   item: MediaItemCardRead
@@ -52,6 +54,7 @@ export default function MediaCard({ item, bucket: bucketProp }: Props) {
 
   return (
     <article className="rounded-xl overflow-hidden border border-neutral-800 bg-neutral-900">
+
       <Link to={`/bucket/${bucket}/item/${item.id}`} state={{ item }}>
         <div className="aspect-video bg-neutral-800">
           {thumb ? (
@@ -75,7 +78,7 @@ export default function MediaCard({ item, bucket: bucketProp }: Props) {
             size={18}
           />
         </div>
-
+        <TagChipsCompact tags={item.tags} maxVisible={6} />
         {/* Path */}
         <div className="text-xs text-neutral-500 font-mono">
           {item.identity.media_folder}/{item.identity.identity_name}.{item.identity.video_ext}
@@ -86,6 +89,7 @@ export default function MediaCard({ item, bucket: bucketProp }: Props) {
           {duration ? `${duration}` : ''}
           {item.width && item.height ? ` • ${item.width}×${item.height}` : ''}
         </div>
+
       </div>
     </article>
   )

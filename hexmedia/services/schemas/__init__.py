@@ -20,7 +20,8 @@ from hexmedia.services.schemas.tags import (
     TagUpdate,
     TagGroupNode,
     TagGroupMove,
-    TagGroupCreate
+    TagGroupCreate,
+    TagGroupUpdate,
 )
 from hexmedia.services.schemas.assets import (
     MediaAssetRead,
@@ -46,5 +47,6 @@ __all__ = [
     "TagGroupCreate",
     "MediaAssetRead",
     "MediaAssetCreate",
-    "MediaItemCardRead"
+    "MediaItemCardRead",
+    "TagGroupUpdate"
 ]

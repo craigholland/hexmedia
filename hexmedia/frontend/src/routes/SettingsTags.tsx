@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import {
   useTagGroups, useCreateTagGroup, useUpdateTagGroup, useDeleteTagGroup,
   useTags, useCreateTag, useUpdateTag, useDeleteTag
@@ -33,6 +33,10 @@ export default function SettingsTags() {
   const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null)
 
   const tree = useMemo(() => buildTree(groupsQ.data), [groupsQ.data])
+  const selectedGroup = useMemo(
+    () => groupsQ.data?.find(g => String(g.id) === String(selectedGroupId)) || null,
+    [groupsQ.data, selectedGroupId]
+  )
 
   const tagsQ = useTags(selectedGroupId)
 
@@ -46,34 +50,52 @@ export default function SettingsTags() {
   const updateTagM = useUpdateTag()
   const deleteTagM = useDeleteTag()
 
-  // Local forms
-  const [gForm, setGForm] = useState<{ id?: string; parent_id: string | null; key: string; display_name: string; cardinality: 'MULTI'|'SINGLE'; description?: string }>({
-    parent_id: null, key: '', display_name: '', cardinality: 'MULTI', description: ''
-  })
+  // Refs for “focus after action”
+  const groupDisplayNameRef = useRef<HTMLInputElement | null>(null)
+  const tagNameRef = useRef<HTMLInputElement | null>(null)
 
-  const [tForm, setTForm] = useState<{ id?: string; name: string; slug: string; description?: string; parent_id?: string | null }>({
-    name: '', slug: '', description: '', parent_id: null
-  })
+  // Local forms
+  const [gForm, setGForm] = useState<{
+    id?: string
+    parent_id: string | null
+    key: string
+    display_name: string
+    cardinality: 'MULTI'|'SINGLE'
+    description?: string
+  }>({ parent_id: null, key: '', display_name: '', cardinality: 'MULTI', description: '' })
+
+  const [tForm, setTForm] = useState<{
+    id?: string
+    name: string
+    slug: string
+    description?: string
+    parent_id?: string | null
+  }>({ name: '', slug: '', description: '', parent_id: null })
 
   const onSelectGroup = (id: string | null) => {
-    setSelectedGroupId(id)
-    // reset tag form with group context
+    // toggle selection
+    setSelectedGroupId(prev => (prev === id ? null : id))
+    // reset tag form context
     setTForm({ id: undefined, name: '', slug: '', description: '', parent_id: null })
   }
 
   const startNewGroup = (parent_id: string | null) => {
     setGForm({ id: undefined, parent_id, key: '', display_name: '', cardinality: 'MULTI', description: '' })
+    if (parent_id) setSelectedGroupId(parent_id)
+    // focus the display name for quick typing
+    setTimeout(() => groupDisplayNameRef.current?.focus(), 0)
   }
 
   const startEditGroup = (g: TagGroupRead) => {
     setGForm({
       id: g.id,
-      parent_id: g.parent_id,
+      parent_id: g.parent_id ?? null,
       key: g.key,
       display_name: g.display_name,
-      cardinality: g.cardinality,
+      cardinality: g.cardinality as 'MULTI' | 'SINGLE',
       description: g.description || ''
     })
+    setTimeout(() => groupDisplayNameRef.current?.focus(), 0)
   }
 
   const submitGroup = () => {
@@ -96,12 +118,13 @@ export default function SettingsTags() {
 
   const removeGroup = (g: TagGroupRead) => {
     if (!confirm(`Delete group "${g.display_name}"?\n(Will fail if it has children or tags.)`)) return
-    deleteGroupM.mutate(g.id)
+    deleteGroupM.mutate({ id: g.id })
     if (selectedGroupId === g.id) setSelectedGroupId(null)
   }
 
   const startNewTag = () => {
     setTForm({ id: undefined, name: '', slug: '', description: '', parent_id: null })
+    setTimeout(() => tagNameRef.current?.focus(), 0)
   }
 
   const startEditTag = (t: TagRead) => {
@@ -110,30 +133,36 @@ export default function SettingsTags() {
       name: t.name,
       slug: t.slug,
       description: t.description || '',
-      // only allow parent selection within same group; keep it for UI completeness
       parent_id: t.parent_id ?? null
     })
+    setTimeout(() => tagNameRef.current?.focus(), 0)
   }
 
   const submitTag = () => {
-    const name = tForm.name.trim()
-    const slug = (tForm.slug || slugify(name)).trim()
-    if (!name || !slug) return alert('Name and Slug are required.')
-    const body = {
-      group_id: selectedGroupId ?? null,
-      name,
-      slug,
-      description: tForm.description?.trim() || null,
-      parent_id: tForm.parent_id ?? null
-    }
+  const name = tForm.name.trim()
+  const slug = (tForm.slug || slugify(name)).trim()
+  if (!name || !slug) return alert('Name and Slug are required.')
 
-    if (tForm.id) {
-      updateTagM.mutate({ id: tForm.id, body })
-    } else {
-      createTagM.mutate(body)
-    }
-    startNewTag()
+  const baseBody: any = {
+    name,
+    slug,
+    description: tForm.description?.trim() || null,
+    parent_id: tForm.parent_id ?? null,
   }
+
+  // If a group is selected, include group_path **in the body only**
+  if (selectedGroup?.path) {
+    baseBody.group_path = selectedGroup.path
+  }
+
+  if (tForm.id) {
+    updateTagM.mutate({ id: tForm.id, body: baseBody })
+  } else {
+    createTagM.mutate({ body: baseBody })
+  }
+
+  startNewTag()
+}
 
   const removeTag = (t: TagRead) => {
     if (!confirm(`Delete tag "${t.name}"?`)) return
@@ -155,9 +184,25 @@ export default function SettingsTags() {
               <div className="text-xs text-neutral-500 font-mono">{n.key} • {n.cardinality}</div>
             </div>
             <div className="flex items-center gap-2">
-              <button className="text-xs px-2 py-1 border rounded-md" onClick={(e) => { e.stopPropagation(); startNewGroup(n.id) }}>+ Child</button>
-              <button className="text-xs px-2 py-1 border rounded-md" onClick={(e) => { e.stopPropagation(); startEditGroup(n) }}>Edit</button>
-              <button className="text-xs px-2 py-1 border rounded-md" onClick={(e) => { e.stopPropagation(); removeGroup(n) }}>Delete</button>
+              <button
+                className="text-xs px-2 py-1 border rounded-md"
+                onClick={(e) => { e.stopPropagation(); startNewGroup(n.id) }}
+                title="Create a child group under this group"
+              >
+                + Child
+              </button>
+              <button
+                className="text-xs px-2 py-1 border rounded-md"
+                onClick={(e) => { e.stopPropagation(); startEditGroup(n) }}
+              >
+                Edit
+              </button>
+              <button
+                className="text-xs px-2 py-1 border rounded-md"
+                onClick={(e) => { e.stopPropagation(); removeGroup(n) }}
+              >
+                Delete
+              </button>
             </div>
           </div>
           {n.children?.length ? renderTree(n.children, level + 1) : null}
@@ -186,14 +231,17 @@ export default function SettingsTags() {
           <div className="grid grid-cols-2 gap-3">
             <div className="col-span-2">
               <label className="block text-sm mb-1">Display name</label>
-              <input className="w-full rounded-md border px-3 py-1.5 bg-white dark:bg-neutral-900"
+              <input
+                ref={groupDisplayNameRef}
+                className="w-full rounded-md border px-3 py-1.5 bg-white dark:bg-neutral-900"
                 value={gForm.display_name}
                 onChange={e => setGForm(s => ({ ...s, display_name: e.target.value }))}
               />
             </div>
             <div>
               <label className="block text-sm mb-1">Key (slug-like)</label>
-              <input className="w-full rounded-md border px-3 py-1.5 bg-white dark:bg-neutral-900"
+              <input
+                className="w-full rounded-md border px-3 py-1.5 bg-white dark:bg-neutral-900"
                 value={gForm.key}
                 onChange={e => setGForm(s => ({ ...s, key: e.target.value }))}
                 placeholder="e.g. people, genre…"
@@ -201,7 +249,8 @@ export default function SettingsTags() {
             </div>
             <div>
               <label className="block text-sm mb-1">Cardinality</label>
-              <select className="w-full rounded-md border px-3 py-1.5 bg-white dark:bg-neutral-900"
+              <select
+                className="w-full rounded-md border px-3 py-1.5 bg-white dark:bg-neutral-900"
                 value={gForm.cardinality}
                 onChange={e => setGForm(s => ({ ...s, cardinality: e.target.value as 'MULTI'|'SINGLE' }))}
               >
@@ -224,7 +273,8 @@ export default function SettingsTags() {
             </div>
             <div className="col-span-2">
               <label className="block text-sm mb-1">Description</label>
-              <textarea className="w-full rounded-md border px-3 py-1.5 bg-white dark:bg-neutral-900"
+              <textarea
+                className="w-full rounded-md border px-3 py-1.5 bg-white dark:bg-neutral-900"
                 rows={2}
                 value={gForm.description}
                 onChange={e => setGForm(s => ({ ...s, description: e.target.value }))}
@@ -244,52 +294,23 @@ export default function SettingsTags() {
       <section className="lg:col-span-7 space-y-4">
         <div className="flex items-center justify-between">
           <div className="text-lg font-semibold">
-            {selectedGroupId ? 'Tags in selected group' : 'Ungrouped Tags'}
+            {selectedGroup
+              ? `Create Tag for ${selectedGroup.display_name}`
+              : 'Create Tag (Freeform)'}
           </div>
           <button className="px-2 py-1 border rounded-md" onClick={startNewTag}>+ New Tag</button>
         </div>
 
-        <div className="rounded-xl border border-neutral-200 dark:border-neutral-800 overflow-auto">
-          <table className="min-w-full text-sm">
-            <thead className="bg-neutral-100/70 dark:bg-neutral-800/60">
-              <tr>
-                <th className="text-left p-2">Name</th>
-                <th className="text-left p-2">Slug</th>
-                <th className="text-left p-2">Parent</th>
-                <th className="text-left p-2 w-40">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {tagsQ.data?.map(t => (
-                <tr key={t.id} className="border-t border-neutral-100 dark:border-neutral-800">
-                  <td className="p-2">{t.name}</td>
-                  <td className="p-2 font-mono">{t.slug}</td>
-                  <td className="p-2">{t.parent_id ? '(nested)' : '—'}</td>
-                  <td className="p-2">
-                    <div className="flex gap-2">
-                      <button className="px-2 py-1 border rounded-md" onClick={() => startEditTag(t)}>Edit</button>
-                      <button className="px-2 py-1 border rounded-md" onClick={() => removeTag(t)}>Delete</button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-              {!tagsQ.data?.length && (
-                <tr><td colSpan={4} className="p-3 text-neutral-500">No tags.</td></tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-
         <div className="rounded-xl border border-neutral-200 dark:border-neutral-800 p-4 space-y-2">
-          <div className="text-sm text-neutral-500">{tForm.id ? 'Edit tag' : 'Create tag'}</div>
           <div className="grid grid-cols-2 gap-3">
             <div className="col-span-2">
               <label className="block text-sm mb-1">Name</label>
               <input
+                ref={tagNameRef}
                 className="w-full rounded-md border px-3 py-1.5 bg-white dark:bg-neutral-900"
                 value={tForm.name}
                 onChange={e => setTForm(s => ({ ...s, name: e.target.value, slug: s.id ? s.slug : slugify(e.target.value) }))}
-                placeholder="e.g. Action, VideoGame, Portrait…"
+                placeholder="e.g. Amateur, 4K, Portrait…"
               />
             </div>
             <div>
@@ -332,6 +353,43 @@ export default function SettingsTags() {
             </button>
             <button className="px-3 py-2 rounded-md border" onClick={startNewTag}>Reset</button>
           </div>
+        </div>
+
+        <div className="flex items-center justify-between">
+          <div className="text-lg font-semibold">
+            {selectedGroupId ? 'Tags in selected group' : 'Ungrouped Tags'}
+          </div>
+        </div>
+
+        <div className="rounded-xl border border-neutral-200 dark:border-neutral-800 overflow-auto">
+          <table className="min-w-full text-sm">
+            <thead className="bg-neutral-100/70 dark:bg-neutral-800/60">
+              <tr>
+                <th className="text-left p-2">Name</th>
+                <th className="text-left p-2">Slug</th>
+                <th className="text-left p-2">Parent</th>
+                <th className="text-left p-2 w-40">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {tagsQ.data?.map(t => (
+                <tr key={t.id} className="border-t border-neutral-100 dark:border-neutral-800">
+                  <td className="p-2">{t.name}</td>
+                  <td className="p-2 font-mono">{t.slug}</td>
+                  <td className="p-2">{t.parent_id ? '(nested)' : '—'}</td>
+                  <td className="p-2">
+                    <div className="flex gap-2">
+                      <button className="px-2 py-1 border rounded-md" onClick={() => startEditTag(t)}>Edit</button>
+                      <button className="px-2 py-1 border rounded-md" onClick={() => removeTag(t)}>Delete</button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+              {!tagsQ.data?.length && (
+                <tr><td colSpan={4} className="p-3 text-neutral-500">No tags.</td></tr>
+              )}
+            </tbody>
+          </table>
         </div>
       </section>
     </div>

@@ -53,14 +53,27 @@ export type TagGroupCreate = {
 }
 
 export type TagGroupUpdate = Partial<TagGroupCreate>
+// When fetching a tree, each node is a group with nested children.
+export type TagGroupNode = TagGroupRead & { children: TagGroupNode[] }
+
+// Move semantics can vary by backend. This flexible type satisfies the FE:
+// - Move under a new parent (inside)
+// - Or position relative to a sibling
+export type TagGroupMove = {
+  new_parent_id?: string | null
+  position?: 'before' | 'after' | 'inside'
+  sibling_id?: string | null
+}
 
 export type TagRead = {
   id: string
   group_id?: string | null
+    group_path?: string | null
   name: string
   slug: string
   description?: string | null
   parent_id?: string | null
+    parent_path?: string | null
 }
 
 export type TagCreate = {
@@ -74,14 +87,12 @@ export type TagCreate = {
 export type TagUpdate = Partial<TagCreate>
 
 
-
-
-
 // --- Assets ---
 export interface MediaAssetRead {
   id: string
   kind: string // e.g. 'thumb' | 'collage' | 'video' | ...
   url: string
+    rel_path?: string | null
   width?: number | null
   height?: number | null
 }

@@ -1,8 +1,8 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { getJSON, postJSON, patchJSON, delJSON } from './api'
+import { getJSON, postJSON, patchJSON, delJSON, rateItem } from './api'
 import type { BucketsCount, MediaItemCardRead, IngestPlanItem, IngestRunResponse, ThumbPlanItem,
     ThumbResponse, MediaAssetRead, TagGroupRead, TagGroupCreate, TagGroupUpdate,
-    TagRead, TagCreate, TagUpdate } from '@/types'
+    TagRead, TagCreate, TagUpdate, TagGroupNode, TagGroupMove } from '@/types'
 
 // --- helpers ---
 function pickThumbURL(item: MediaItemCardRead): string | null {
@@ -33,13 +33,22 @@ export function useBucketCounts() {
  * - Always include assets, persons, ratings, *and* tags (for chips)
  * - Normalize each item to ensure `thumb_url` exists (fallback to assets)
  */
+// export function useBucketCards(bucket: string, include = 'assets,persons,tags,ratings') {
+//   return useQuery({
+//     queryKey: ['bucket', bucket, include],
+//     queryFn: () => getJSON<MediaItemCardRead[]>(`/media-items/by-bucket/${bucket}`, { include })
+//   })
+// }
 export function useBucketCards(bucket: string, include = 'assets,persons,tags,ratings') {
-  return useQuery({
-    queryKey: ['bucket', bucket, include],
-    queryFn: () => getJSON<MediaItemCardRead[]>(`/media-items/by-bucket/${bucket}`, { include })
-  })
-}
-
+   return useQuery({
+     queryKey: ['bucket', bucket, include],
+    queryFn: async () => {
+      const data = await getJSON<MediaItemCardRead[]>(`/media-items/by-bucket/${bucket}`, { include })
+      // ensure thumb_url present when asset list is provided
+      return data.map(it => (it.thumb_url ? it : { ...it, thumb_url: pickThumbURL(it) }))
+    }
+   })
+ }
 // Ingest
 export function useIngestPlan(limit = 20) {
   return useQuery({
@@ -127,7 +136,7 @@ export function useUpdateTagGroup() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: ({ id, body }: { id: string; body: TagGroupUpdate }) =>
-      patchJSON<TagGroupRead>(`/tags/groups/${id}`, body),
+      patchJSON<TagGroupRead>(`/tags/tag-groups/${id}`, body),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['tag-groups'] })
   })
 }
@@ -135,8 +144,11 @@ export function useUpdateTagGroup() {
 export function useDeleteTagGroup() {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: (id: string) => delJSON<void>(`/tags/groups/${id}`),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['tag-groups'] })
+    mutationFn: ({ id }: { id: string }) => delJSON<void>(`/tags/tag-groups/${id}`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['tag-groups'] })
+      qc.invalidateQueries({ queryKey: ['tag-groups','tree'] })
+    }
   })
 }
 
@@ -149,9 +161,17 @@ export function useTagGroupTree() {
 }
 
 export function useCreateTagGroup() {
+    const qc = useQueryClient()
   return useMutation({
     mutationFn: (body: TagGroupCreate) =>
-      postJSON<TagGroupNode>('/tags/tag-groups', body)
+      postJSON<TagGroupNode>('/tags/tag-groups', body),
+    onSuccess: () => {
+      // Your tree UI uses useTagGroups() (GET /tags/groups)
+      // so we must invalidate that cache key to refetch.
+      qc.invalidateQueries({ queryKey: ['tag-groups'] })
+      // If anywhere else uses the tree endpoint, refresh that too.
+      qc.invalidateQueries({ queryKey: ['tag-groups', 'tree'] })
+    }
   })
 }
 
@@ -174,35 +194,172 @@ export function useTags(groupId?: string | null, search?: string) {
   })
 }
 
-export function useCreateTag() {
-  const qc = useQueryClient()
-  return useMutation({
-    mutationFn: (body: TagCreate) => postJSON<TagRead>('/tags', body),
-    onSuccess: (_d, vars) => {
-      qc.invalidateQueries({ queryKey: ['tags'] })
-      qc.invalidateQueries({ queryKey: ['tag-groups'] })
-      // Optionally pre-select group refresh
-      if (vars.group_id) qc.invalidateQueries({ queryKey: ['tags', { groupId: vars.group_id }] })
-    }
-  })
-}
+// export function useCreateTag() {
+//   const qc = useQueryClient()
+//   return useMutation({
+//     mutationFn: (body: TagCreate) => postJSON<TagRead>('/tags', body),
+//     onSuccess: (_d, vars) => {
+//       qc.invalidateQueries({ queryKey: ['tags'] })
+//       qc.invalidateQueries({ queryKey: ['tag-groups'] })
+//       // Optionally pre-select group refresh
+//       if (vars.group_id) qc.invalidateQueries({ queryKey: ['tags', { groupId: vars.group_id }] })
+//     }
+//   })
+// }
 
+export function useCreateTag() {
+   const qc = useQueryClient()
+   return useMutation({
+
+      mutationFn: (args: { body: TagCreate & { group_path?: string | null; parent_path?: string | null } }) => {
+
+      return postJSON<TagRead>('/tags', args.body)
+    },
+    onSuccess: (_d, args) => {
+       qc.invalidateQueries({ queryKey: ['tags'] })
+       qc.invalidateQueries({ queryKey: ['tag-groups'] })
+      if (args.body.group_id) {
+        qc.invalidateQueries({ queryKey: ['tags', { groupId: args.body.group_id }] })
+      }
+     }
+   })
+ }
+
+// export function useUpdateTag() {
+//   const qc = useQueryClient()
+//   return useMutation({
+//     mutationFn: ({ id, body }: { id: string; body: TagUpdate }) =>
+//       patchJSON<TagRead>(`/tags/${id}`, body),
+//     onSuccess: (_d, vars) => {
+//       qc.invalidateQueries({ queryKey: ['tags'] })
+//       if (vars.body.group_id) qc.invalidateQueries({ queryKey: ['tags', { groupId: vars.body.group_id }] })
+//     }
+//   })
+// }
 export function useUpdateTag() {
-  const qc = useQueryClient()
-  return useMutation({
-    mutationFn: ({ id, body }: { id: string; body: TagUpdate }) =>
-      patchJSON<TagRead>(`/tags/${id}`, body),
-    onSuccess: (_d, vars) => {
-      qc.invalidateQueries({ queryKey: ['tags'] })
-      if (vars.body.group_id) qc.invalidateQueries({ queryKey: ['tags', { groupId: vars.body.group_id }] })
-    }
-  })
-}
+   const qc = useQueryClient()
+   return useMutation({
+
+       mutationFn: (args: { id: string; body: TagUpdate & { group_path?: string | null; parent_path?: string | null } }) => {
+      return patchJSON<TagRead>(`/tags/${args.id}`, args.body)
+    },
+    onSuccess: (_d, args) => {
+       qc.invalidateQueries({ queryKey: ['tags'] })
+
+      if (args.body.group_id) {
+        qc.invalidateQueries({ queryKey: ['tags', { groupId: args.body.group_id }] })
+      }
+     }
+   })
+ }
 
 export function useDeleteTag() {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: (id: string) => delJSON<void>(`/tags/${id}`),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['tags'] })
+    mutationFn: ({ id }: { id: string }) => delJSON<void>(`/tags/${id}`),
+    onMutate: async ({ id }) => {
+      // cancel incoming fetches and snapshot
+      await qc.cancelQueries({ queryKey: ['tags'] })
+      const prev = qc.getQueriesData<TagRead[]>({ queryKey: ['tags'] })
+      // optimistically remove from any cached tag lists
+      prev.forEach(([key, list]) => {
+        if (Array.isArray(list)) {
+          qc.setQueryData(
+            key as any,
+            list.filter(t => t.id !== id)
+          )
+        }
+      })
+      return { prev }
+    },
+    onError: (_err, _vars, ctx) => {
+      // rollback on error
+      if (ctx?.prev) {
+        ctx.prev.forEach(([key, list]) => qc.setQueryData(key as any, list))
+      }
+    },
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: ['tags'] })
+    }
+  })
+}
+// attach tag
+export function useAttachTag(bucket?: string, include = 'assets,persons,tags,ratings') {
+  const qc = useQueryClient()
+  return useMutation({
+    
+          // pass the whole tag so we can optimistically update the UI
+    mutationFn: (args: { mediaId: string; tag: TagRead }) =>
+      postJSON<{ media_item_id: string; tag_id: string }>(
+        `/media-tags/media-items/${args.mediaId}/tags`,
+        { tag_id: args.tag.id }
+      ),
+    onMutate: async ({ mediaId, tag }) => {
+      if (!bucket) return
+      await qc.cancelQueries({ queryKey: ['bucket', bucket, include] })
+      const prev = qc.getQueryData<import('@/types').MediaItemCardRead[]>(['bucket', bucket, include])
+      // optimistic update: add/replace in SINGLE groups, add if not present in MULTI/freeform
+        const getGroupKey = (t: import('@/types').TagRead) =>
+        (t.group_id ?? t.group_path ?? null) as string | null
+      qc.setQueryData<import('@/types').MediaItemCardRead[]>(['bucket', bucket, include], (list) => {
+        if (!list) return list
+        return list.map((it) => {
+          if (String(it.id) !== String(mediaId)) return it
+          const existing = it.tags ?? []
+            const key = getGroupKey(tag)
+          const sameGroup = key ? existing.filter(t => getGroupKey(t) === key) : []
+          let nextTags = existing.slice()
+            if (key && sameGroup.length > 0) {
+            // replace all tags from that group (safe for SINGLE; also fine UX for MULTI)
+            nextTags = nextTags.filter(t => getGroupKey(t) !== key)
+          }
+          if (!nextTags.find(t => String(t.id) === String(tag.id))) {
+            nextTags.push(tag)
+          }
+          return { ...it, tags: nextTags }
+        })
+      })
+      return { prev }
+    },
+    onError: (_err, _vars, ctx) => {
+      if (!bucket) return
+      // rollback
+      if (ctx?.prev) qc.setQueryData(['bucket', bucket, include], ctx.prev)
+    },
+    onSettled: () => {
+      if (bucket) qc.invalidateQueries({ queryKey: ['bucket', bucket, include] })
+    },
+  })
+}
+
+// detach tag
+export function useDetachTag(bucket?: string, include = 'assets,persons,tags,ratings') {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (args: { mediaId: string; tagId: string }) =>
+      delJSON<void>(`/media-tags/media-items/${args.mediaId}/tags/${args.tagId}`),
+      onMutate: async ({ mediaId, tagId }) => {
+        if (!bucket) return
+          await qc.cancelQueries({ queryKey: ['bucket', bucket, include] })
+          const prev = qc.getQueryData<import('@/types').MediaItemCardRead[]>(['bucket', bucket, include])
+          qc.setQueryData<import('@/types').MediaItemCardRead[]>(['bucket', bucket, include], (list) => {
+            if (!list) return list
+            return list.map((it) => {
+              if (String(it.id) !== String(mediaId)) return it
+              const nextTags = (it.tags ?? []).filter(t => String(t.id) !== String(tagId))
+              return { ...it, tags: nextTags }
+            })
+          })
+          return { prev }
+    },
+    onError: (_err, _vars, ctx) => {
+      if (!bucket) return
+      if (ctx?.prev) qc.setQueryData(['bucket', bucket, include], ctx.prev)
+    },
+    onSuccess: (_d, vars) => {
+      if (bucket) {
+        qc.invalidateQueries({ queryKey: ['bucket', bucket, include] })
+      }
+    }
   })
 }
