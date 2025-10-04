@@ -1,7 +1,6 @@
 import { useMemo, useState } from 'react'
 import { useTagGroups, useTags, useAttachTag, useDetachTag, useCreateTag, useGroupTags } from '@/lib/hooks'
 import MultiSelectPopover from '@/components/Tagging/MultiSelectPopover'
-import { useToasts } from '@/providers/ToastProvider'
 import type { MediaItemCardRead, TagRead, TagGroupRead } from '@/types'
 
 type Treeish = TagGroupRead & { children?: TagGroupRead[] }
@@ -92,7 +91,6 @@ export default function TaggingPanel({ item, bucket }: { item: MediaItemCardRead
     return m
   }, [groupsFlat])
 
-  const { success, error } = useToasts()
   const detachM = useDetachTag(bucket)
   const attachM = useAttachTag(bucket)
   const createTagM = useCreateTag()
@@ -142,29 +140,18 @@ export default function TaggingPanel({ item, bucket }: { item: MediaItemCardRead
         const prev = new Set(selectedIds)
         const next = new Set(nextIds)
 
-        const toDetach = [...prev].filter((id) => !next.has(id))
-        const toAttach = [...next].filter((id) => !prev.has(id))
-
-        // fire off updates (optimistic handled by hooks)
-        for (const id of toDetach) {
-          detachM.mutate(
-            { mediaId: String(item.id), tagId: String(id) },
-            { onError: () => error('Failed to detach tag') }
-          )
-        }
-        for (const id of toAttach) {
-          const tag = byId.get(String(id))
-          if (tag) {
-            attachM.mutate(
-              { mediaId: String(item.id), tag },
-              { onError: () => error('Failed to attach tag') }
-            )
+        // Detach removed
+        for (const id of prev) {
+          if (!next.has(id)) {
+            detachM.mutate({ mediaId: String(item.id), tagId: String(id) })
           }
         }
-
-        // summarize the change for UX
-        if (toAttach.length || toDetach.length) {
-          success(`Updating tags: +${toAttach.length} / −${toDetach.length}`)
+        // Attach added
+        for (const id of next) {
+          if (!prev.has(id)) {
+            const tag = byId.get(String(id))
+            if (tag) attachM.mutate({ mediaId: String(item.id), tag })
+          }
         }
       }
 
@@ -198,15 +185,7 @@ export default function TaggingPanel({ item, bucket }: { item: MediaItemCardRead
                 <Chip
                   key={t.id}
                   tag={t}
-                  onRemove={() =>
-                    detachM.mutate(
-                      { mediaId: String(item.id), tagId: String(t.id) },
-                      {
-                        onSuccess: () => success(`Removed “${t.name}”`),
-                        onError: () => error('Failed to detach tag'),
-                      }
-                    )
-                  }
+                  onRemove={() => detachM.mutate({ mediaId: String(item.id), tagId: String(t.id) })}
                 />
               ))
             ) : (
@@ -217,7 +196,7 @@ export default function TaggingPanel({ item, bucket }: { item: MediaItemCardRead
       )
     }
 
-    // SINGLE: dropdown UX
+    // SINGLE: keep your current dropdown UX
     const groupTagsQ = useTags(groupId)
     const options = (groupTagsQ.data ?? []).filter(
       (t) => !selected.some((s) => String(s.id) === String(t.id))
@@ -235,15 +214,7 @@ export default function TaggingPanel({ item, bucket }: { item: MediaItemCardRead
                 const tagId = e.target.value
                 if (tagId) {
                   const tag = options.find((t) => String(t.id) === tagId)
-                  if (tag) {
-                    attachM.mutate(
-                      { mediaId: String(item.id), tag },
-                      {
-                        onSuccess: () => success(`Added “${tag.name}”`),
-                        onError: () => error('Failed to attach tag'),
-                      }
-                    )
-                  }
+                  if (tag) attachM.mutate({ mediaId: String(item.id), tag })
                 }
                 e.currentTarget.value = ''
               }}
@@ -264,15 +235,7 @@ export default function TaggingPanel({ item, bucket }: { item: MediaItemCardRead
               <Chip
                 key={t.id}
                 tag={t}
-                onRemove={() =>
-                  detachM.mutate(
-                    { mediaId: String(item.id), tagId: String(t.id) },
-                    {
-                      onSuccess: () => success(`Removed “${t.name}”`),
-                      onError: () => error('Failed to detach tag'),
-                    }
-                  )
-                }
+                onRemove={() => detachM.mutate({ mediaId: String(item.id), tagId: String(t.id) })}
               />
             ))
           ) : (
@@ -301,22 +264,12 @@ export default function TaggingPanel({ item, bucket }: { item: MediaItemCardRead
       const name = q.trim()
       if (!name) return
       const body = { name, slug: slugify(name), description: null as string | null }
-      createTagM.mutate(
-        { body },
-        {
-          onSuccess: (newTag) => {
-            attachM.mutate(
-              { mediaId: String(item.id), tag: newTag },
-              {
-                onSuccess: () => success(`Created “${newTag.name}” and attached`),
-                onError: () => error('Created tag, but failed to attach'),
-              }
-            )
-            setQ('')
-          },
-          onError: () => error('Failed to create tag'),
+      createTagM.mutate({ body }, {
+        onSuccess: (newTag) => {
+          attachM.mutate({ mediaId: String(item.id), tag: newTag })
+          setQ('')
         }
-      )
+      })
     }
 
     return (
@@ -329,15 +282,7 @@ export default function TaggingPanel({ item, bucket }: { item: MediaItemCardRead
               <Chip
                 key={t.id}
                 tag={t}
-                onRemove={() =>
-                  detachM.mutate(
-                    { mediaId: String(item.id), tagId: String(t.id) },
-                    {
-                      onSuccess: () => success(`Removed “${t.name}”`),
-                      onError: () => error('Failed to detach tag'),
-                    }
-                  )
-                }
+                onRemove={() => detachM.mutate({ mediaId: String(item.id), tagId: String(t.id) })}
               />
             ))
           ) : (
@@ -372,13 +317,7 @@ export default function TaggingPanel({ item, bucket }: { item: MediaItemCardRead
                         onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = '#004080')}
                         onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
                         onClick={() => {
-                          attachM.mutate(
-                            { mediaId: String(item.id), tag: t },
-                            {
-                              onSuccess: () => success(`Added “${t.name}”`),
-                              onError: () => error('Failed to attach tag'),
-                            }
-                          )
+                          attachM.mutate({ mediaId: String(item.id), tag: t })
                           setQ('')
                         }}
                         title={t.slug}

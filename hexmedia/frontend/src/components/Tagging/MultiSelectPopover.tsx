@@ -65,6 +65,7 @@ export default function MultiSelectPopover(props: MultiSelectPopoverProps) {
   }, [items, search, getItemLabel]);
 
   const selectedSet = useMemo(() => new Set(selectedIds), [selectedIds]);
+
   const toggle = useCallback(
     (id: string) => {
       const next = new Set(selectedSet);
@@ -74,7 +75,7 @@ export default function MultiSelectPopover(props: MultiSelectPopoverProps) {
     [selectedSet, onChange]
   );
 
-  // click outside to close
+  // Click outside to close
   useEffect(() => {
     if (!isOpen) return;
     const onDoc = (e: MouseEvent) => {
@@ -115,26 +116,52 @@ export default function MultiSelectPopover(props: MultiSelectPopoverProps) {
   };
 
   return (
-    <div className={`relative inline-block text-left ${className}`} ref={popoverRef} onKeyDown={onKeyDown}>
+    <div
+      className={`relative inline-block text-left ${className}`}
+      ref={popoverRef}
+      onKeyDown={onKeyDown}
+    >
       {trigger({ open, isOpen })}
 
       {isOpen && (
-        <div className="absolute z-50 mt-2 w-72 rounded-xl border border-gray-200 bg-white shadow-lg" role="dialog" aria-modal="true">
-          <div className="p-2">
+        <div
+          className="absolute z-50 mt-2 w-72 rounded-xl border border-gray-200 bg-white shadow-lg
+                     dark:border-neutral-700 dark:bg-neutral-900"
+          role="dialog"
+          aria-modal="true"
+        >
+          {/* Search */}
+          <div className="p-2 border-b border-transparent dark:border-neutral-800">
             <input
               ref={inputRef}
               type="text"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder={searchPlaceholder}
-              className="w-full rounded-lg border border-gray-300 px-2 py-1.5 text-sm outline-none focus:border-gray-400"
+              className="w-full rounded-lg border border-gray-300 px-2 py-1.5 text-sm outline-none
+                         focus:border-gray-400
+                         dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-100 dark:focus:border-neutral-600"
               aria-label="Filter tags"
             />
           </div>
 
-          <ul ref={listRef} className="max-h-64 overflow-auto py-1" role="listbox" aria-multiselectable="true">
-            {loading && <li className="px-3 py-2 text-sm text-gray-500">Loading…</li>}
-            {!loading && filtered.length === 0 && <li className="px-3 py-2 text-sm text-gray-500">{emptyLabel}</li>}
+          {/* List */}
+          <ul
+            ref={listRef}
+            className="max-h-64 overflow-auto py-1"
+            role="listbox"
+            aria-multiselectable="true"
+          >
+            {loading && (
+              <li className="px-3 py-2 text-sm text-gray-500 dark:text-neutral-400">
+                Loading…
+              </li>
+            )}
+            {!loading && filtered.length === 0 && (
+              <li className="px-3 py-2 text-sm text-gray-500 dark:text-neutral-400">
+                {emptyLabel}
+              </li>
+            )}
             {!loading &&
               filtered.map((item, idx) => {
                 const id = getItemKey(item);
@@ -146,23 +173,37 @@ export default function MultiSelectPopover(props: MultiSelectPopoverProps) {
                     key={id}
                     role="option"
                     aria-selected={checked}
-                    className={`flex cursor-pointer items-center gap-2 px-3 py-2 text-sm ${active ? "bg-gray-100" : ""}`}
+                    className={`flex cursor-pointer items-center gap-2 px-3 py-2 text-sm
+                                ${active ? "bg-gray-100 dark:bg-neutral-800" : ""}`}
                     onMouseEnter={() => setActiveIndex(idx)}
                     onClick={() => toggle(id)}
                     tabIndex={-1}
                   >
-                    <input type="checkbox" readOnly checked={checked} className="pointer-events-none h-4 w-4" aria-hidden="true" />
+                    <input
+                      type="checkbox"
+                      readOnly
+                      checked={checked}
+                      className="pointer-events-none h-4 w-4 accent-neutral-800 dark:accent-neutral-200"
+                      aria-hidden="true"
+                    />
                     <span className="truncate">{label}</span>
                   </li>
                 );
               })}
           </ul>
 
-          <div className="flex items-center justify-between border-t border-gray-200 px-3 py-2">
-            <button className="rounded-lg px-3 py-1.5 text-sm hover:bg-gray-100" onClick={() => setIsOpen(false)}>
+          {/* Footer */}
+          <div className="flex items-center justify-between border-t border-gray-200 px-3 py-2 dark:border-neutral-800">
+            <button
+              className="rounded-lg px-3 py-1.5 text-sm hover:bg-gray-100 dark:hover:bg-neutral-800"
+              onClick={() => setIsOpen(false)}
+            >
               Done
             </button>
-            <button className="rounded-lg px-3 py-1.5 text-sm text-red-600 hover:bg-red-50" onClick={() => onChange([])}>
+            <button
+              className="rounded-lg px-3 py-1.5 text-sm text-red-600 hover:bg-red-50 dark:hover:bg-neutral-800"
+              onClick={() => onChange([])}
+            >
               Clear all
             </button>
           </div>

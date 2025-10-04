@@ -1,4 +1,4 @@
-import { Link, useLocation, useParams } from 'react-router-dom'
+import { Link, useLocation, useParams, useNavigate } from 'react-router-dom'
 import { useEffect, useMemo, useState } from 'react'
 import { useBucketCards, useRateItem } from '@/lib/hooks'
 import type { MediaItemCardRead } from '@/types'
@@ -19,6 +19,7 @@ function fmtDuration(sec?: number | null) {
 }
 
 export default function ItemDetail() {
+    const nav = useNavigate()
   const { bucket = '', id = '' } = useParams()
   const location = useLocation()
   const state = location.state as { item?: MediaItemCardRead } | undefined
@@ -57,6 +58,27 @@ export default function ItemDetail() {
       }
     )
   }
+  // Keyboard shortcuts: 0–5 to rate, ←/→ to navigate
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null
+      // don’t hijack typing in inputs
+      if (target && /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName)) return
+      if (e.key >= '0' && e.key <= '5') {
+        e.preventDefault()
+        handleRate(Number(e.key))
+      } else if (e.key === 'ArrowLeft' && prev) {
+        e.preventDefault()
+        nav(`/bucket/${bucket}/item/${prev.id}`, { state: { item: prev } })
+      } else if (e.key === 'ArrowRight' && next) {
+        e.preventDefault()
+        nav(`/bucket/${bucket}/item/${next.id}`, { state: { item: next } })
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bucket, prev, next, score, item])
 
   // Build prev/next within this bucket (based on returned order)
   const { prev, next } = useMemo(() => {
