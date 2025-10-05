@@ -6,8 +6,8 @@ from pydantic import BaseModel, ConfigDict
 # READ (base)
 class PersonRead(BaseModel):
     id: UUID
-    name: str
-    aka: Optional[str] = None  # adjust if your model uses a different column
+    display_name: str
+    normalized_name: Optional[str] = None  # adjust if your model uses a different column
     model_config = ConfigDict(from_attributes=True)
 
 # WRITE
