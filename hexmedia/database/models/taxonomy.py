@@ -1,18 +1,18 @@
+# hexmedia/database/models/taxonomy.py
 from __future__ import annotations
 
 from typing import Optional, List, TYPE_CHECKING
 from uuid import UUID as UUID_t
 
 from sqlalchemy import (
-    Boolean, Enum as SAEnum, ForeignKey, String,
-    Text, text, UniqueConstraint, CheckConstraint, Integer
+    Enum as SAEnum, ForeignKey, String,
+    Text, UniqueConstraint, CheckConstraint, Integer, Index, func
 )
-from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from hexmedia.database.core.main import Base
 from hexmedia.database.core.service_object import ServiceObject
-from hexmedia.domain.enums import PersonRole, Cardinality
+from hexmedia.domain.enums import Cardinality
 
 if TYPE_CHECKING:
     from .media import MediaItem
@@ -74,6 +74,8 @@ class Tag(ServiceObject, Base):
             "(parent_id IS NULL) OR (group_id IS NOT NULL)",
             name="ck_tag_parent_requires_group",
         ),
+        Index("ix_tag_parent_id", "parent_id"),
+        Index("ix_tag_group_id", "group_id"),
     )
 
     group_id: Mapped[Optional[UUID_t]] = mapped_column(
@@ -84,7 +86,7 @@ class Tag(ServiceObject, Base):
     description: Mapped[Optional[str]] = mapped_column(Text)
 
     parent_id: Mapped[Optional[UUID_t]] = mapped_column(
-        ForeignKey("tag.id", ondelete="SET NULL"),  # <-- table name, not class
+        ForeignKey("tag.id", ondelete="SET NULL"),
         nullable=True,
     )
 
@@ -109,56 +111,20 @@ class Tag(ServiceObject, Base):
         secondary=lambda: _t("media_tag"),
         back_populates="tags",
     )
-
+Index("ix_tag_name_lower", func.lower(Tag.name))
 
 class MediaTag(Base):
     __tablename__ = "media_tag"
-    __table_args__ = (UniqueConstraint("media_item_id", "tag_id", name="uq_media_tag_item_tag"),)
+    __table_args__ = (
+        UniqueConstraint("media_item_id", "tag_id", name="uq_media_tag_item_tag"),
+        Index("ix_media_tag_tag_id", "tag_id"),
+    )
 
     media_item_id: Mapped[UUID_t] = mapped_column(
-        UUID(as_uuid=True),
         ForeignKey("media_item.id", ondelete="CASCADE"),
         primary_key=True,
     )
     tag_id: Mapped[UUID_t] = mapped_column(
-        UUID(as_uuid=True),
         ForeignKey("tag.id", ondelete="CASCADE"),
         primary_key=True,
-    )
-
-
-# =======================
-# People
-# =======================
-class Person(ServiceObject, Base):
-    __tablename__ = "person"
-
-    # Use `name` to match queries (MediaQueryRepo orders by DBPerson.name)
-    display_name: Mapped[str] = mapped_column(String(255), nullable=False)
-    normalized_name: Mapped[Optional[str]] = mapped_column(String(255))
-
-    media_items: Mapped[List["MediaItem"]] = relationship(
-        "MediaItem",
-        secondary=lambda: _t("media_person"),
-        back_populates="people",
-    )
-
-
-class MediaPerson(Base):
-    __tablename__ = "media_person"
-
-    media_item_id: Mapped[UUID_t] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("media_item.id", ondelete="CASCADE"),
-        primary_key=True,
-    )
-    person_id: Mapped[UUID_t] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("person.id", ondelete="CASCADE"),
-        primary_key=True,
-    )
-    role: Mapped[PersonRole] = mapped_column(
-        SAEnum(PersonRole, name="person_role"),
-        nullable=False,
-        server_default=text("'actor'"),
     )

@@ -17,7 +17,8 @@ from hexmedia.domain.enums.media_kind import MediaKind
 from hexmedia.domain.enums.asset_kind import AssetKind
 
 if TYPE_CHECKING:
-    from .taxonomy import Tag, Person, MediaTag, MediaPerson
+    from hexmedia.database.models.taxonomy import Tag, MediaTag
+    from hexmedia.database.models.person import Person, MediaPerson
 
 def _t(name: str):
     schema = Base.metadata.schema  # e.g. "hexmedia"

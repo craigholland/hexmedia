@@ -5,7 +5,7 @@ from uuid import UUID
 from sqlalchemy import select, and_, func
 from sqlalchemy.orm import Session
 
-from hexmedia.database.models.taxonomy import (
+from hexmedia.database.models.person import (
     Person as DBPerson,
     MediaPerson as DBMediaPerson,
 )

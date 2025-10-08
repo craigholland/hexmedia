@@ -23,7 +23,7 @@ from hexmedia.database.models.media import (
     MediaAsset as DBMediaAsset,
     Rating as DBRating
 )
-from hexmedia.database.models.taxonomy import (
+from hexmedia.database.models.person import (
     Person as DBPerson,
     MediaPerson as DBMediaPerson,
 )
@@ -260,4 +260,3 @@ def get_media_items_by_bucket(
             it.tags = [TagRead.model_validate(t) for t in (tags_by_id.get(it.id) or [])]
 
     return items
-

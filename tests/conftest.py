@@ -23,6 +23,8 @@ def _prepare_schema(engine: Engine, schema: str = APP_SCHEMA) -> None:
     with engine.begin() as conn:
         conn.execute(text(f'create schema if not exists "{schema}"'))
         conn.execute(text(f'set search_path to "{schema}", public'))
+        conn.execute(text("CREATE EXTENSION IF NOT EXISTS pg_trgm"))
+        conn.execute(text("CREATE EXTENSION IF NOT EXISTS pgcrypto"))
 
 @pytest.fixture(scope="session")
 def db_engine(_postgres_container) -> Engine:

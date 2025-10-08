@@ -1,14 +1,21 @@
+# hexmedia/database/models/__init__.py
+
 from hexmedia.database.models.media import (
     Base,
     MediaItem,
     MediaAsset,
-    Rating
+    Rating,
 )
 from hexmedia.database.models.taxonomy import (
+    TagGroup,
     Tag,
     MediaTag,
+)
+from hexmedia.database.models.person import (
     Person,
-    MediaPerson
+    PersonAlias,
+    PersonAliasLink,
+    MediaPerson,
 )
 
 __all__ = [
@@ -16,8 +23,11 @@ __all__ = [
     "MediaItem",
     "MediaAsset",
     "Rating",
+    "TagGroup",
     "Tag",
     "MediaTag",
     "Person",
-    "MediaPerson"
+    "PersonAlias",
+    "PersonAliasLink",
+    "MediaPerson",
 ]
