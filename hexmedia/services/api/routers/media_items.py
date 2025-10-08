@@ -23,7 +23,7 @@ from hexmedia.database.models.media import (
     MediaAsset as DBMediaAsset,
     Rating as DBRating
 )
-from hexmedia.database.models.taxonomy import (
+from hexmedia.database.models.person import (
     Person as DBPerson,
     MediaPerson as DBMediaPerson,
 )

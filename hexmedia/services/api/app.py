@@ -5,7 +5,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 
 from hexmedia.common.settings import get_settings
-from hexmedia.services.api.routers import media_items, ratings, tags, people, ingest, assets, media_tags
+from hexmedia.services.api.routers import media_items, ratings, tags, people, ingest, assets, media_tags, media_people
 
 cfg = get_settings()
 dev = cfg.app_env.lower() == "development"
@@ -40,8 +40,10 @@ def create_app() -> FastAPI:
     app.include_router(assets.router)
     app.include_router(media_tags.router)
 
+    app.include_router(media_people.router)
+
     # For images/videos
-    app.mount("/media", StaticFiles(directory=str(cfg.media_root)), name="public-media")
+    app.mount("/media", StaticFiles(directory=str(cfg.media_root), check_dir=False), name="public-media")
     return app
 
 app = create_app()

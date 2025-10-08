@@ -1,25 +1,62 @@
+# hexmedia/services/schemas/people.py
 from __future__ import annotations
-from typing import Optional, List
-from uuid import UUID
-from pydantic import BaseModel, ConfigDict
 
-# READ (base)
-class PersonRead(BaseModel):
-    id: UUID
-    display_name: str
-    normalized_name: Optional[str] = None  # adjust if your model uses a different column
+from typing import List, Optional
+from uuid import UUID
+
+from pydantic import BaseModel, ConfigDict, Field
+
+from hexmedia.domain.enums import PersonRole
+
+
+# ---------- Aliases ----------
+
+class PersonAliasCreate(BaseModel):
+    alias: str = Field(..., min_length=1, max_length=255)
+    notes: Optional[str] = None
+
+
+class PersonAliasRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
-# WRITE
-class PersonCreate(BaseModel):
-    name: str
-    aka: Optional[str] = None
+    id: UUID
+    alias: str
+    alias_normalized: str
+    notes: Optional[str] = None
+
+
+# ---------- Person ----------
+
+class PersonBase(BaseModel):
+    display_name: str = Field(..., min_length=1, max_length=255)
+    normalized_name: Optional[str] = Field(default=None, max_length=255)
+    notes: Optional[str] = None
+    avatar_asset_id: Optional[UUID] = None
+
+
+class PersonCreate(PersonBase):
+    pass
+
 
 class PersonUpdate(BaseModel):
-    name: Optional[str] = None
-    aka: Optional[str] = None
+    display_name: Optional[str] = Field(default=None, max_length=255)
+    normalized_name: Optional[str] = Field(default=None, max_length=255)
+    notes: Optional[str] = None
+    avatar_asset_id: Optional[UUID] = None
 
-# Linking payloads (if you prefer body payloads over params)
-class PersonLinkPayload(BaseModel):
-    person_id: UUID
+
+class PersonRead(PersonBase):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    aliases: List[PersonAliasRead] = []
+
+
+# ---------- Media <-> Person link ----------
+
+class MediaPersonLinkRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     media_item_id: UUID
+    person_id: UUID
+    role: PersonRole
