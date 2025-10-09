@@ -16,7 +16,7 @@ class IngestPlanItemSchema(BaseModel):
     ext: str = Field(..., examples=["mp4"])
     dest_rel_dir: str = Field(..., examples=["aaa/abc123def456"])
     dest_filename: str = Field(..., examples=["abc123def456.mp4"])
-    bucket: str = Field(..., min_length=3, max_length=3, examples=["aaa"])
+    bucket: str = Field(..., min_length=3, max_length=3, examples=["aaa"], pattern=r"^[0-9a-z]{3}")
     item: str = Field(..., min_length=12, max_length=12, examples=["abc123def456"])
     kind: str = Field(..., examples=["video", "image", "sidecar", "unknown"])
     supported: bool = Field(...)

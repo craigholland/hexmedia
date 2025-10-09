@@ -27,12 +27,40 @@ class ThumbRunReport:
     def start(self): self.started_at = datetime.now()
     def stop(self): self.finished_at = datetime.now()
 
+
 class ThumbService:
     def __init__(self, session: Session):
         self.session = session
         self.cfg = get_settings()
         self.q = MediaQueryRepo(session)
         self.w = SqlAlchemyMediaAssetRepo(session)
+
+    # --- helpers -------------------------------------------------------------
+
+    @staticmethod
+    def _sanitize_format(fmt: Optional[str]) -> str:
+        """Lowercase, trim, and only allow a safe subset."""
+        allowed = {"jpg", "jpeg", "png", "webp"}
+        f = (fmt or "").strip().lower()
+        # normalize jpeg -> jpg for consistency
+        if f == "jpeg":
+            f = "jpg"
+        return f if f in allowed else ""
+
+    def _resolve_format(self, requested: Optional[str], cfg_default: Optional[str], *, fallback: str) -> str:
+        """
+        Decide final format with precedence:
+          1) valid requested value
+          2) valid settings default
+          3) hard fallback (png for collage, jpg for thumb)
+        """
+        req = self._sanitize_format(requested)
+        if req:
+            return req
+        cfgv = self._sanitize_format(cfg_default)
+        return cfgv or fallback
+
+    # --- main ---------------------------------------------------------------
 
     def run(
         self,
@@ -41,11 +69,11 @@ class ThumbService:
         workers: Optional[int],
         regenerate: bool,
         include_missing: bool,
-        thumb_format: str,
-        collage_format: str,
-        thumb_width: int,
-        tile_width: int,
-        upscale_policy: str,
+        thumb_format: Optional[str],
+        collage_format: Optional[str],
+        thumb_width: Optional[int],
+        tile_width: Optional[int],
+        upscale_policy: Optional[str],
     ) -> ThumbRunReport:
         rep = ThumbRunReport()
         rep.start()
@@ -56,48 +84,49 @@ class ThumbService:
             rep.stop()
             return rep
 
-        # 2) Build worker
+        # 2) Resolve options against Settings (and sanitize)
+        fmt_thumb = self._resolve_format(thumb_format, getattr(self.cfg, "thumb_format", None), fallback="jpg")
+        fmt_collage = self._resolve_format(collage_format, getattr(self.cfg, "collage_format", None), fallback="png")
+
         tw = ThumbWorker(
             media_root=self.cfg.media_root,
             query_repo=self.q,
             asset_repo=self.w,
-            regenerate=regenerate,
-            include_missing=include_missing,
-            thumb_format=thumb_format or self.cfg.thumb_format,
-            collage_format=(collage_format or thumb_format or self.cfg.collage_format),
-            thumb_width=thumb_width or self.cfg.thumb_width,
-            tile_width=tile_width or self.cfg.collage_tile_width,
-            upscale_policy=upscale_policy or self.cfg.upscale_policy,
+            regenerate=bool(regenerate),
+            include_missing=bool(include_missing),
+            thumb_format=fmt_thumb,
+            collage_format=fmt_collage,  # <- will be "png" unless caller explicitly asked for something else valid
+            thumb_width=(thumb_width or getattr(self.cfg, "thumb_width", 480)),
+            tile_width=(tile_width or getattr(self.cfg, "collage_tile_width", 160)),
+            upscale_policy=(upscale_policy or getattr(self.cfg, "upscale_policy", "never")),
         )
 
-        max_workers = min(workers or 1, self.cfg.max_thumb_workers)
+        # Thread cap: at least 1, no more than cfg
+        max_workers_cfg = int(getattr(self.cfg, "max_thumb_workers", 4) or 4)
+        max_workers = max(1, min(int(workers or 1), max_workers_cfg))
+
         rep.scanned = len(cands)
 
         # 3) Fan out → aggregate results
+        from typing import Dict, Any
         with ThreadPoolExecutor(max_workers=max_workers) as pool:
-            futures = [
-                pool.submit(tw.process_one, mid, rel_dir, fname)
-                for (mid, rel_dir, fname) in cands
-            ]
+            futures = [pool.submit(tw.process_one, mid, rel_dir, fname) for (mid, rel_dir, fname) in cands]
             for fut in as_completed(futures):
                 try:
-                    r = fut.result()
+                    r: Dict[str, Any] = fut.result()
                 except Exception as e:
                     rep.errors += 1
                     rep.error_details.append(str(e))
                     continue
 
-                # tolerate workers returning None or non-dicts
                 if not isinstance(r, dict):
                     continue
 
-                # aggregate safely with defaults
                 rep.generated += int(r.get("generated", 0) or 0)
                 rep.updated  += int(r.get("updated", 0) or 0)
                 rep.skipped  += int(r.get("skipped", 0) or 0)
                 rep.errors   += int(r.get("errors", 0) or 0)
 
-                # optional error fields from workers
                 err = r.get("error") or r.get("error_detail") or r.get("error_details")
                 if err:
                     if isinstance(err, (list, tuple)):

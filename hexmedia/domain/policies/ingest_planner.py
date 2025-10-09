@@ -1,10 +1,10 @@
+# hexmedia/domain/policies/ingest_planner.py
 from __future__ import annotations
-
-import os
 
 from pathlib import Path
 from typing import Iterable, Optional, Dict, List
 
+from hexmedia.common.settings import get_settings
 from hexmedia.common.naming.slugger import random_slug
 from hexmedia.services.ingest.utils import is_supported_media_file
 from hexmedia.domain.dataclasses.ingest import IngestPlanItem
@@ -17,22 +17,27 @@ SUPPORTED_EXTS = VIDEO_EXTS | IMAGE_EXTS
 
 class IngestPlanner:
     """
-    Bucket-balancing + identity assignment for incoming files.
+    Assigns incoming files to 3-char base36 buckets with a CAPACITY per bucket.
+    Capacity is read from settings as `hexmedia_bucket_max` and represents
+    HOW MANY media item folders may live under a bucket like "000".
 
-    If a query repo is provided:
-      - With explicit counts: balance only across those reported buckets.
-      - With iter_media_folders: derive counts from observed buckets only.
-    Otherwise (no repo): initialize 00..N-1 with zeros from HEXMEDIA_BUCKET_MAX.
+    Bucket selection rule:
+      - Prefer the lexicographically smallest existing bucket whose count < capacity.
+      - If all existing buckets are full, allocate the NEXT base36 bucket key
+        (e.g. after "000" comes "001", … "009", "00a", …, up to "zzz").
     """
 
     def __init__(self, query_repo: Optional[object]) -> None:
         self.q = query_repo
-        self._bucket_max = int(os.getenv("HEXMEDIA_BUCKET_MAX", "100"))
+        cfg = get_settings()
+        cap = int(getattr(cfg, "hexmedia_bucket_max", 1000) or 1000)
+        # be defensive
+        self._capacity: int = max(1, cap)
 
     # ---------------- public ----------------
 
     def plan(self, files: Iterable[Path | str]) -> List[IngestPlanItem]:
-        counts = self.get_bucket_counts()
+        counts = self.get_bucket_counts()  # normalized to 3-char base36 keys
 
         out: List[IngestPlanItem] = []
         for f in files:
@@ -48,20 +53,20 @@ class IngestPlanner:
 
             supported = (ext in SUPPORTED_EXTS) and is_supported_media_file(src)
 
-            # Choose bucket with smallest count (ties: lexicographically smallest)
-            bucket = self._choose_bucket(counts)
+            # Choose the first (lexicographically) bucket that is not at capacity.
+            bucket = self._select_bucket(counts)
             counts[bucket] = counts.get(bucket, 0) + 1
 
             identity = random_slug(12)
             dest_rel_dir = f"{bucket}/{identity}"
             dest_filename = f"{identity}.{ext}" if ext else identity
-            media_folder = dest_rel_dir
+            media_folder = dest_rel_dir  # existing tests expect "<bucket>/<identity>"
 
             out.append(
                 IngestPlanItem(
                     src=src,
                     bucket=bucket,
-                    item=identity,
+                    item=identity,               # dataclass exposes identity_name in schemas
                     ext=ext,
                     dest_rel_dir=dest_rel_dir,
                     dest_filename=dest_filename,
@@ -75,11 +80,11 @@ class IngestPlanner:
 
     def get_bucket_counts(self) -> Dict[str, int]:
         """
-        Return counts per two-digit bucket key ("00".."NN").
-        Robust fallback order:
-          1) query_repo.count_media_items_by_bucket()
-          2) derive from query_repo.iter_media_folders()
-          3) initialize zeros for all buckets [0.._bucket_max)
+        Return counts per base36 bucket key ("000".."zzz").
+        Priority:
+          1) query_repo.count_media_items_by_bucket()  -> normalize keys to 3-char base36
+          2) derive from query_repo.iter_media_folders() (e.g. "00/abc123" or "000/…")
+          3) fallback to {"000": 0} so we start at the first bucket
         """
         counts: Dict[str, int] = {}
 
@@ -88,7 +93,10 @@ class IngestPlanner:
             try:
                 res = getattr(self.q, "count_media_items_by_bucket")()  # may return dict-like or None
                 if res:
-                    counts = dict(res)
+                    for k, v in dict(res).items():
+                        norm = self._normalize_key(str(k))
+                        if norm is not None:
+                            counts[norm] = counts.get(norm, 0) + int(v or 0)
             except Exception:
                 counts = {}
 
@@ -96,37 +104,90 @@ class IngestPlanner:
         if not counts and self.q and hasattr(self.q, "iter_media_folders"):
             try:
                 derived: Dict[str, int] = {}
-                for mf in self.q.iter_media_folders():  # e.g. "00/abc123..."
+                for mf in self.q.iter_media_folders():  # e.g. "00/abc", "000/abc", "0a9/xyz"
                     if not mf:
                         continue
-                    b = str(mf).split("/", 1)[0]  # bucket is first segment
-                    # normalize to two digits if numeric-ish
-                    try:
-                        if len(b) < 2 and b.isdigit():
-                            b = f"{int(b):02d}"
-                    except Exception:
-                        pass
-                    derived[b] = derived.get(b, 0) + 1
+                    bucket_raw = str(mf).split("/", 1)[0]
+                    norm = self._normalize_key(bucket_raw)
+                    if norm is None:
+                        continue
+                    derived[norm] = derived.get(norm, 0) + 1
                 counts = derived
             except Exception:
                 counts = {}
 
-        # 3) initialize zeros if still empty
+        # 3) initialize first bucket if still empty
         if not counts:
-            counts = {f"{i:02d}": 0 for i in range(self._bucket_max)}
+            counts = {"000": 0}
 
         return counts
 
     # ---------------- internals ----------------
 
-    def _all_bucket_keys(self) -> List[str]:
+    def _select_bucket(self, counts: Dict[str, int]) -> str:
         """
-        Generate "00".."NN" for self._bucket_max. Two digits up to 99,
-        three digits beyond (you can refine if you prefer).
+        Pick the first (lexicographic base36) bucket with count < capacity.
+        If none exist, allocate the next base36 bucket after the current maximum.
         """
-        width = 2 if self._bucket_max <= 100 else 3
-        return [f"{i:0{width}d}" for i in range(self._bucket_max)]
+        # Try existing buckets first (smallest key first)
+        for key in sorted(counts.keys(), key=self._base36_sort_key):
+            if counts.get(key, 0) < self._capacity:
+                return key
 
-    def _choose_bucket(self, counts: Dict[str, int]) -> str:
-        # Smallest count first; in ties choose lexicographically smallest key
-        return min(counts.items(), key=lambda kv: (kv[1], kv[0]))[0]
+        # All existing buckets are full: allocate the next one.
+        if counts:
+            max_key = max(counts.keys(), key=self._base36_sort_key)
+            next_key = self._inc_base36(max_key)
+        else:
+            next_key = "000"
+
+        if next_key not in counts:
+            counts[next_key] = 0
+        return next_key
+
+    # --- base36 helpers ---
+
+    @staticmethod
+    def _base36_sort_key(key: str) -> int:
+        return int(key.lower(), 36)
+
+    @staticmethod
+    def _normalize_key(raw: str) -> Optional[str]:
+        """
+        Accepts inputs like "0", "00", "000", "2", "a9", "01", etc.
+        Returns a zero-padded 3-char base36 string ("000".."zzz"),
+        or None if invalid.
+        """
+        s = (raw or "").strip().lower()
+        if not s:
+            return None
+        try:
+            val = int(s, 36)
+            if val < 0:
+                return None
+            base36 = IngestPlanner._to_base36(val)
+            return base36.rjust(3, "0")[-3:]
+        except Exception:
+            return None
+
+    @staticmethod
+    def _inc_base36(key: str) -> str:
+        val = int(key.lower(), 36)
+        nxt = val + 1
+        # cap at 'zzz' (36^3 - 1 = 46655). If you want to overflow behavior, change here.
+        max_val = (36 ** 3) - 1
+        if nxt > max_val:
+            raise ValueError("All buckets up to 'zzz' are at capacity.")
+        return IngestPlanner._to_base36(nxt).rjust(3, "0")
+
+    @staticmethod
+    def _to_base36(num: int) -> str:
+        if num == 0:
+            return "0"
+        digits = "0123456789abcdefghijklmnopqrstuvwxyz"
+        out = []
+        n = num
+        while n > 0:
+            n, r = divmod(n, 36)
+            out.append(digits[r])
+        return "".join(reversed(out))

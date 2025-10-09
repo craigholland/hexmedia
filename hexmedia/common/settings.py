@@ -119,7 +119,7 @@ class Settings(BaseSettings):
     media_root_override: Optional[Path] = Field(default=None, alias="MEDIA_ROOT")
 
     # -------- Identity / Naming rules --------
-    hexmedia_bucket_max: int = 2000
+    hexmedia_bucket_max: int = 50
     ingest_run_limit: int = Field(10, description="Default max files to plan/run per request")
 
     # -------- Allowed extensions --------
